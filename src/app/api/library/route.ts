@@ -34,6 +34,7 @@ export async function GET(req: Request) {
     return Response.json({
       designs: await listDesigns(
         new URL(req.url).searchParams.get("project") || "",
+        new URL(req.url).searchParams.get("trash") === "1",
       ),
     });
   });
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
     await getProject(meta.project);
     if (meta.id) {
       const [existing] = await db().execute<RowDataPacket[]>(
-        "SELECT id FROM designs WHERE id=? AND project_id=?",
+        "SELECT id FROM designs WHERE id=? AND project_id=? AND deleted_at IS NULL",
         [meta.id, meta.project],
       );
       if (!existing.length) fail(404, "Design not found");
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
       let revision = 0;
       if (meta.id) {
         const [found] = await connection.execute<RowDataPacket[]>(
-          "SELECT revision FROM designs WHERE id=? AND project_id=? FOR UPDATE",
+          "SELECT revision FROM designs WHERE id=? AND project_id=? AND deleted_at IS NULL FOR UPDATE",
           [id, meta.project],
         );
         if (!found.length) fail(404, "Design not found");
@@ -133,11 +134,37 @@ export async function PATCH(req: Request) {
     await requireUser(req);
     const value = z.object({ id: z.uuid(), status }).parse(await bodyJson(req));
     const [result] = await db().execute(
-      "UPDATE designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL SET d.status=? WHERE d.id=?",
+      "UPDATE designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL SET d.status=? WHERE d.id=? AND d.deleted_at IS NULL",
       [value.status, value.id],
     );
     if (!(result as { affectedRows: number }).affectedRows)
       fail(404, "Design not found");
+    return Response.json({ ok: true });
+  });
+}
+
+export async function DELETE(req: Request) {
+  return endpoint(async () => {
+    await requireUser(req);
+    const value = z
+      .object({
+        id: z.uuid(),
+        name: z.string().min(1).max(100),
+        expectedRevision: z.number().int().min(0),
+      })
+      .parse(await bodyJson(req));
+    const [result] = await db().execute(
+      "UPDATE designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL SET d.deleted_at=UTC_TIMESTAMP(3),d.published_revision=NULL,d.published_path=NULL,d.published_at=NULL WHERE d.id=? AND d.deleted_at IS NULL AND d.name=? AND d.revision=?",
+      [value.id, value.name, value.expectedRevision],
+    );
+    if (!(result as { affectedRows: number }).affectedRows) {
+      const [existing] = await db().execute<RowDataPacket[]>(
+        "SELECT d.id FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE d.id=? AND d.deleted_at IS NULL",
+        [value.id],
+      );
+      if (!existing.length) fail(404, "Design not found");
+      fail(409, "This design changed. Refresh before deleting again.");
+    }
     return Response.json({ ok: true });
   });
 }

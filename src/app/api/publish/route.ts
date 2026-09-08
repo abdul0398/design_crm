@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     try {
       await connection.beginTransaction();
       const [data] = await connection.execute<RowDataPacket[]>(
-        "SELECT * FROM designs WHERE id=? FOR UPDATE",
+        "SELECT * FROM designs WHERE id=? AND deleted_at IS NULL FOR UPDATE",
         [id],
       );
       const design = data[0];

@@ -64,6 +64,7 @@ let cookie = "",
   designId = "";
 const storedPaths = new Set<string>();
 const extraProjects = new Set<string>();
+const extraDesigns = new Set<string>();
 const headers = () => ({ host: new URL(origin).host, origin, cookie });
 const send = (path: string, method = "GET", body?: unknown) =>
   transport(endpoint + path, {
@@ -102,6 +103,8 @@ after(async () => {
       if (d?.published_path) storedPaths.add(d.published_path);
       await db().execute("DELETE FROM designs WHERE id=?", [designId]);
     }
+    for (const id of extraDesigns)
+      await db().execute("DELETE FROM designs WHERE id=?", [id]);
     await db().execute("DELETE FROM projects WHERE id=?", [projectId]);
     for (const id of extraProjects)
       await db().execute("DELETE FROM projects WHERE id=?", [id]);
@@ -138,6 +141,20 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
   );
   await t.test("authentication, origin and host checks", async () => {
     assert.equal((await send("/api/projects")).status, 401);
+    assert.equal(
+      (
+        await send("/api/library", "DELETE", {
+          id: userId,
+          name: "Test",
+          expectedRevision: 0,
+        })
+      ).status,
+      401,
+    );
+    assert.equal(
+      (await send("/api/library/" + userId + "/restore", "POST")).status,
+      401,
+    );
     const invalid = await transport(endpoint + "/api/auth/login", {
       method: "POST",
       headers: {
@@ -489,6 +506,208 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       ).designs[0];
       assert.equal(restored.revision, 2);
       assert.equal(restored.liveUrl, null);
+      assert.equal(
+        (await send("/api/publish", "POST", { id: designId, revision: 2 }))
+          .status,
+        200,
+      );
+      const [published] = await rows<{ published_path: string }>(
+        "SELECT published_path FROM designs WHERE id=?",
+        [designId],
+      );
+      storedPaths.add(published.published_path);
+    },
+  );
+  await t.test(
+    "individual design trash blocks access, protects siblings and restores files without republishing",
+    async () => {
+      const make = new FormData();
+      Object.entries({
+        project: projectId,
+        name: "Sibling linked design",
+        format: "Other",
+        status: "Unused",
+        url: "https://example.com/",
+        expectedRevision: "0",
+      }).forEach(([k, v]) => make.set(k, v));
+      const siblingResponse = await transport(endpoint + "/api/library", {
+        method: "POST",
+        headers: headers(),
+        body: make,
+      });
+      assert.equal(siblingResponse.status, 201);
+      const sibling = (await siblingResponse.json()).id;
+      extraDesigns.add(sibling);
+      const deletion = {
+        id: designId,
+        name: "Test website",
+        expectedRevision: 2,
+      };
+      const hostile = await transport(endpoint + "/api/library", {
+        method: "DELETE",
+        headers: {
+          ...headers(),
+          origin: "https://attacker.invalid",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(deletion),
+      });
+      assert.equal(hostile.status, 403);
+      assert.equal(
+        (
+          await send("/api/library", "DELETE", {
+            ...deletion,
+            expectedRevision: 1,
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (
+          await send("/api/library", "DELETE", {
+            ...deletion,
+            name: "Old name",
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (await send("/api/library", "DELETE", deletion)).status,
+        200,
+      );
+      assert.equal(
+        (await send("/api/library", "DELETE", deletion)).status,
+        404,
+      );
+      assert.equal((await siteFetch(liveUrl + "/site/index.html")).status, 404);
+      assert.equal(
+        (
+          await siteFetch(
+            new URL(previewUrl).origin + "/site/assets/style.css",
+            previewCookie,
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (await send("/api/preview", "POST", { id: designId, revision: 2 }))
+          .status,
+        404,
+      );
+      assert.equal(
+        (await send("/api/publish", "POST", { id: designId, revision: 2 }))
+          .status,
+        404,
+      );
+      assert.equal(
+        (
+          await send("/api/library", "PATCH", {
+            id: designId,
+            status: "Active",
+          })
+        ).status,
+        404,
+      );
+      const stale = new FormData();
+      Object.entries({
+        ...deletion,
+        expectedRevision: "2",
+        project: projectId,
+        format: "Website",
+        status: "Active",
+        url: "",
+      }).forEach(([k, v]) => stale.set(k, String(v)));
+      assert.equal(
+        (
+          await transport(endpoint + "/api/library", {
+            method: "POST",
+            headers: headers(),
+            body: stale,
+          })
+        ).status,
+        404,
+      );
+      const list = (
+        await (await send("/api/library?project=" + projectId)).json()
+      ).designs;
+      assert.deepEqual(
+        list.map((d: { id: string }) => d.id),
+        [sibling],
+      );
+      const projects = (await (await send("/api/projects")).json()).projects;
+      assert.equal(
+        projects.find((p: { id: string }) => p.id === projectId).count,
+        1,
+      );
+      const trash = (
+        await (
+          await send("/api/library?project=" + projectId + "&trash=1")
+        ).json()
+      ).designs;
+      assert.equal(trash.length, 1);
+      assert.equal(trash[0].id, designId);
+      assert.equal(trash[0].revision, 2);
+      const [revision] = await rows<{ storage_path: string }>(
+        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=1",
+        [designId],
+      );
+      assert.equal(
+        await readFile(
+          diskPath(revision.storage_path + "/site/assets/style.css"),
+          "utf8",
+        ),
+        "body{color:green}",
+      );
+      const project = await (await send("/api/projects/" + projectId)).json();
+      assert.equal(
+        (
+          await send("/api/projects/" + projectId, "DELETE", {
+            name: project.name,
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (await send("/api/library/" + designId + "/restore", "POST")).status,
+        404,
+      );
+      assert.equal(
+        (await send("/api/projects/" + projectId + "/restore", "POST")).status,
+        200,
+      );
+      assert.ok(
+        !(
+          await (await send("/api/library?project=" + projectId)).json()
+        ).designs.some((d: { id: string }) => d.id === designId),
+      );
+      assert.equal(
+        (await send("/api/library/" + designId + "/restore", "POST")).status,
+        200,
+      );
+      assert.equal(
+        (await send("/api/library/" + designId + "/restore", "POST")).status,
+        404,
+      );
+      assert.equal((await siteFetch(liveUrl + "/site/index.html")).status, 404);
+      const restored = (
+        await (await send("/api/library?project=" + projectId)).json()
+      ).designs.find((d: { id: string }) => d.id === designId);
+      assert.equal(restored.revision, 2);
+      assert.equal(restored.liveUrl, null);
+      assert.equal(
+        (
+          await send("/api/library", "DELETE", {
+            id: sibling,
+            name: "Sibling linked design",
+            expectedRevision: 0,
+          })
+        ).status,
+        200,
+      );
+      assert.equal(
+        (await send("/api/library/" + sibling + "/restore", "POST")).status,
+        200,
+      );
       assert.equal(
         (await send("/api/publish", "POST", { id: designId, revision: 2 }))
           .status,

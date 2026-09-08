@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     const trash = new URL(req.url).searchParams.get("trash") === "1";
     return Response.json({
       projects: await rows(
-        "SELECT p.id,p.name,p.site,p.developer,p.launch_window AS `window`,(SELECT COUNT(*) FROM designs d WHERE d.project_id=p.id) AS count FROM projects p WHERE p.deleted_at IS " +
+        "SELECT p.id,p.name,p.site,p.developer,p.launch_window AS `window`,(SELECT COUNT(*) FROM designs d WHERE d.project_id=p.id AND d.deleted_at IS NULL) AS count FROM projects p WHERE p.deleted_at IS " +
           (trash ? "NOT NULL" : "NULL") +
           " ORDER BY p.name,p.id",
       ),

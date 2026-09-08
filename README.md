@@ -8,6 +8,7 @@ A native Next.js App Router conversion of the supplied Launch dashboard. React r
 - Eight starter projects and four agency records preserved from the supplied prototype. Add projects, edit their name/location/developer/launch status, move projects to Trash, and restore them with their designs/files. Trashing immediately disables live websites and existing previews; restored websites require publication again. Imported facts and dates are not independently verified.
 - Editable project information, folder links, and client/agency details; design search by project, status filters, linked designs, ZIP/folder/HTML uploads, file inventories, and entry-page selection.
 - Server validation of file paths, expanded upload size (50 MiB), file count (2,000), duplicates, unsupported/encrypted ZIPs, and symbolic links. No uploaded server-side code is executed.
+- Individual design deletion with confirmation and per-project Design Trash. Deletion disables the live website and all preview revisions; Restore keeps files and revisions, with explicit publishing required to go live again.
 - Immutable upload revisions; separate preview hostnames; public publication snapshots; unpublish. Editing files or client data never changes an existing publication until Publish is clicked again. Status labels do not take pages offline.
 - Docker Compose with Next.js, MySQL, Caddy automatic HTTPS, automatic schema migration, and persistent host directories. No S3 dependency.
 
@@ -109,6 +110,9 @@ All management endpoints require a workspace session. Mutations require `Origin:
 | `GET /api/library?project=:id` | Designs with current file inventories |
 | `POST /api/library` | Create/update metadata and upload files, ZIP, and entry point |
 | `PATCH /api/library` | Change the organisational status |
+| `DELETE /api/library` | Move a design to Trash; body includes `id`, current `name`, and `expectedRevision` |
+| `GET /api/library?project=:id&trash=1` | List designs in this project’s Design Trash |
+| `POST /api/library/:id/restore` | Restore a design in an active project, keeping its website unpublished |
 | `POST /api/preview` | Create a signed URL for an existing revision |
 | `POST /api/publish` / `DELETE /api/publish` | Publish latest revision / unpublish |
 | `GET /api/health` | MySQL connectivity and writable storage readiness |

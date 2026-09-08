@@ -526,6 +526,10 @@ export default function Desk({ loginName }: { loginName: string }) {
       project: Project | null;
     } | null>(null),
     [trash, setTrash] = useState<ProjectNav[] | null>(null),
+    [designTrash, setDesignTrash] = useState<{
+      project: Project;
+      designs: Design[];
+    } | null>(null),
     [confirmation, setConfirmation] = useState<{
       title: string;
       message: string;
@@ -645,6 +649,25 @@ export default function Desk({ loginName }: { loginName: string }) {
         setSearch("");
         selectProject(items.projects[0]?.id || "");
         setNotice("Project moved to Trash. Its websites are offline.");
+      },
+    });
+  }
+  function deleteDesign(design: Design) {
+    setConfirmation({
+      title: "Delete design?",
+      message: `Move “${design.name}” to Design Trash? Its website and preview links will go offline. Uploaded files and revisions are kept so you can restore it.`,
+      label: "Move to Design Trash",
+      run: async () => {
+        await api(
+          "/api/library",
+          json("DELETE", {
+            id: design.id,
+            name: design.name,
+            expectedRevision: design.revision,
+          }),
+        );
+        await refresh();
+        setNotice("Design moved to Trash. Its website is offline.");
       },
     });
   }
@@ -898,14 +921,31 @@ export default function Desk({ loginName }: { loginName: string }) {
                       <p>Keep each website design and its files together.</p>
                     </div>
                   </div>
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    onClick={() => setEditor({})}
-                  >
-                    <Plus size={16} />
-                    Add design
-                  </button>
+                  <div className="design-library-actions">
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void action(async () => {
+                          const items = await api(
+                            "/api/library?project=" + project.id + "&trash=1",
+                          );
+                          setDesignTrash({ project, designs: items.designs });
+                        })
+                      }
+                    >
+                      <Trash2 size={15} />
+                      Design Trash
+                    </button>
+                    <button
+                      className="primary"
+                      disabled={busy}
+                      onClick={() => setEditor({})}
+                    >
+                      <Plus size={16} />
+                      Add design
+                    </button>
+                  </div>
                 </div>
                 <div className="library-toolbar">
                   <div className="library-count">
@@ -1061,6 +1101,15 @@ export default function Desk({ loginName }: { loginName: string }) {
                                 onClick={() => setEditor(d)}
                               >
                                 <Pencil size={16} />
+                              </button>
+                              <button
+                                className="secondary compact danger"
+                                disabled={busy}
+                                aria-label={"Delete " + d.name}
+                                onClick={() => deleteDesign(d)}
+                              >
+                                <Trash2 size={14} />
+                                Delete
                               </button>
                             </div>
                           </td>
@@ -1471,6 +1520,61 @@ export default function Desk({ loginName }: { loginName: string }) {
                   >
                     <RotateCcw size={14} />
                     Restore {p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+        </Modal>
+      )}
+      {designTrash && (
+        <Modal
+          title="Design Trash"
+          onClose={() => setDesignTrash(null)}
+          busy={busy}
+        >
+          <p className="dialog-subtitle">
+            {designTrash.project.name} · Restore designs with their uploaded
+            files and revisions. Websites stay offline until you publish them
+            again.
+          </p>
+          {!designTrash.designs.length ? (
+            <p>No deleted designs in this project.</p>
+          ) : (
+            <ul className="trash-list">
+              {designTrash.designs.map((d) => (
+                <li key={d.id}>
+                  <div>
+                    <strong>{d.name}</strong>
+                    <small>
+                      {d.format} ·{" "}
+                      {d.revision ? `Revision ${d.revision}` : "Linked design"}
+                    </small>
+                  </div>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      void action(async () => {
+                        await api("/api/library/" + d.id + "/restore", {
+                          method: "POST",
+                        });
+                        await refresh();
+                        setDesignTrash(null);
+                        setFilter("All");
+                        setNotice(
+                          "Design restored. Publish its website when ready.",
+                        );
+                      })
+                    }
+                  >
+                    <RotateCcw size={14} />
+                    Restore {d.name}
                   </button>
                 </li>
               ))}
