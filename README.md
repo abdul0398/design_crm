@@ -26,7 +26,7 @@ npm run db:migrate
 mkdir -p storage
 ```
 
-Create an administrator without putting a password directly in shell history:
+Create an administrator without putting a password directly in shell history. Optionally set `ADMIN_USERNAME` (3–64 letters/numbers, dots, underscores or hyphens); when assigned, that username replaces email as the sign-in identifier. The email remains the contact address:
 
 ```bash
 read -r -p 'Admin email: ' ADMIN_EMAIL

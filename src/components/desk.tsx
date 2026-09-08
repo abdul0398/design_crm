@@ -405,7 +405,7 @@ function UploadEditor({
     </Modal>
   );
 }
-export default function Desk({ email }: { email: string }) {
+export default function Desk({ loginName }: { loginName: string }) {
   const [nav, setNav] = useState<ProjectNav[]>([]),
     [selected, setSelected] = useState("amberwood"),
     [project, setProject] = useState<Project | null>(null),
@@ -554,7 +554,7 @@ export default function Desk({ email }: { email: string }) {
         <div className="nav-footer">
           <span className="workspace-avatar">LD</span>
           <div>
-            Agency workspace<small title={email}>{email}</small>
+            Agency workspace<small title={loginName}>{loginName}</small>
           </div>
           <button
             className="icon-button"

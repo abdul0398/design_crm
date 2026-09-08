@@ -34,11 +34,13 @@ export default function Login() {
         <h1>Welcome to Launch</h1>
         <p>Sign in to your design desk.</p>
         <label>
-          Email
+          Username or email
           <input
-            name="email"
-            type="email"
+            name="username"
+            type="text"
             autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
             required
             maxLength={254}
           />

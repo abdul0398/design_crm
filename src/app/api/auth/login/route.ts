@@ -13,17 +13,22 @@ export async function POST(req: Request) {
   return endpoint(async () => {
     assertAppHost(req);
     assertOrigin(req);
-    const { email, password } = z
+    const credentials = z
       .object({
-        email: z
-          .email()
-          .max(254)
-          .transform((s) => s.toLowerCase()),
+        username: z.string().trim().min(1).max(254).optional(),
+        email: z.string().trim().min(1).max(254).optional(),
         password: z.string().min(1).max(256),
       })
+      .refine(
+        (value) => Boolean(value.username || value.email),
+        "Enter your username",
+      )
       .parse(await bodyJson(req));
+    const identifier = (credentials.username ||
+      credentials.email)!.toLowerCase();
+    const { password } = credentials;
     // Account-based counters are shared across processes and cannot be bypassed with a forged IP header.
-    const bucket = hash(email);
+    const bucket = hash(identifier);
     await db().execute(
       "INSERT IGNORE INTO login_limits(bucket,attempts,resets_at) VALUES (?,0,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE))",
       [bucket],
@@ -39,15 +44,15 @@ export async function POST(req: Request) {
     if (limit.attempts > 10)
       fail(429, "Too many attempts. Try again in 15 minutes.");
     const [user] = await rows<{ id: string; password_hash: string }>(
-      "SELECT id,password_hash FROM users WHERE email=?",
-      [email],
+      "SELECT id,password_hash FROM users WHERE COALESCE(username,email)=?",
+      [identifier],
     );
     const valid = await checkPassword(
       password,
       user?.password_hash ||
         "00000000000000000000000000000000:" + "00".repeat(64),
     );
-    if (!user || !valid) fail(401, "Email or password is incorrect");
+    if (!user || !valid) fail(401, "Username or password is incorrect");
     await db().execute("DELETE FROM login_limits WHERE bucket=?", [bucket]);
     await newSession(user.id);
     return Response.json({ ok: true });

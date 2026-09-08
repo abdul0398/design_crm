@@ -34,8 +34,12 @@ export async function checkPassword(password: string, stored: string) {
 export async function currentUser() {
   const token = (await cookies()).get(cookieName)?.value;
   if (!token) return null;
-  const users = await rows<{ id: string; email: string }>(
-    "SELECT u.id,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP(3)",
+  const users = await rows<{
+    id: string;
+    email: string;
+    username: string | null;
+  }>(
+    "SELECT u.id,u.email,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>UTC_TIMESTAMP(3)",
     [hash(token)],
   );
   return users[0] || null;

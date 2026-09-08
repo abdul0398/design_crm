@@ -12,7 +12,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "admin:create": "tsx scripts/create-admin.ts",
     "format": "prettier --write src scripts tests next.config.ts",
-    "format:check": "prettier --check src scripts tests next.config.ts"
+    "format:check": "prettier --check src scripts tests next.config.ts",
+    "admin:username": "tsx scripts/set-username.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.0",

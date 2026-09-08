@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 export default async function Page() {
   const user = await currentUser();
   if (!user) redirect("/login");
-  return <Desk email={user.email} />;
+  return <Desk loginName={user.username || user.email} />;
 }

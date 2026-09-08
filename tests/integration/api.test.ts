@@ -158,6 +158,27 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       "Unknown hosts must be rejected by the gateway or application",
     );
   });
+  await t.test(
+    "username login replaces email without changing password",
+    async () => {
+      const username = "user-" + userId;
+      await db().execute("UPDATE users SET username=? WHERE id=?", [
+        username,
+        userId,
+      ]);
+      assert.equal(
+        (await send("/api/auth/login", "POST", { email, password })).status,
+        401,
+      );
+      const login = await send("/api/auth/login", "POST", {
+        username: "  " + username.toUpperCase() + "  ",
+        password,
+      });
+      assert.equal(login.status, 200, await login.text());
+      cookie = login.headers.get("set-cookie")!.split(";")[0];
+      assert.equal((await send("/api/projects")).status, 200);
+    },
+  );
   let previewUrl = "",
     previewCookie = "",
     liveUrl = "";
