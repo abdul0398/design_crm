@@ -5,7 +5,7 @@ A native Next.js App Router conversion of the supplied Launch dashboard. React r
 ## Included
 
 - Sign-in with scrypt password hashes, database sessions, HTTP-only cookies, origin checks, and shared login attempt limits. All accounts share one agency workspace.
-- Eight project records and four agency records preserved from the supplied prototype. These imported facts and dates are not independently verified.
+- Eight starter projects and four agency records preserved from the supplied prototype. Add projects, edit their name/location/developer/launch status, move projects to Trash, and restore them with their designs/files. Trashing immediately disables live websites and existing previews; restored websites require publication again. Imported facts and dates are not independently verified.
 - Editable project information, folder links, and client/agency details; design search by project, status filters, linked designs, ZIP/folder/HTML uploads, file inventories, and entry-page selection.
 - Server validation of file paths, expanded upload size (50 MiB), file count (2,000), duplicates, unsupported/encrypted ZIPs, and symbolic links. No uploaded server-side code is executed.
 - Immutable upload revisions; separate preview hostnames; public publication snapshots; unpublish. Editing files or client data never changes an existing publication until Publish is clicked again. Status labels do not take pages offline.
@@ -71,6 +71,8 @@ Template fields are supported in HTML text and ordinary quoted attributes. They 
 
 The preview URL expires after 15 minutes and is exchanged for a cookie scoped to that preview hostname. Opening another preview refreshes access. Each revision has its own origin. Publications have a stable per-design hostname. Public HTML is delivered with a CSP sandbox; server-side code in packages cannot run. Avoid uploading service workers or templates that require top-level navigation permissions.
 
+Trash is recoverable and retains files on disk; there is no permanent deletion or automatic trash purge. Starter projects moved to Trash stay deleted across migrations and redeployments.
+
 Historical revisions remain on disk and in MySQL; the initial UI edits and publishes the latest revision. A failed transaction cleans up its new directory where possible. A process crash can leave an unreferenced directory; retain it until a database-aware maintenance/retention policy is introduced. Monitor disk usage because there is no automatic quota or history deletion.
 
 Browser IndexedDB from the old HTML is not automatically imported. Re-upload original website files and re-enter saved details; the supplied HTML and its browser storage have not been modified. The old JSON backup format is not a server restore format.
@@ -99,8 +101,11 @@ All management endpoints require a workspace session. Mutations require `Origin:
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /api/auth/login` / `POST /api/auth/logout` | Workspace session |
-| `GET /api/projects` | Projects and design counts |
-| `GET /api/projects/:id` / `PUT /api/projects/:id` | Project and client fields |
+| `GET /api/projects` / `POST /api/projects` | List active projects and design counts / create a project |
+| `GET /api/projects?trash=1` | List deleted projects |
+| `GET /api/projects/:id` / `PUT /api/projects/:id` | Project identity, project details and client fields |
+| `DELETE /api/projects/:id` | Move project and designs to Trash; body includes the current project `name` |
+| `POST /api/projects/:id/restore` | Restore the project and designs, keeping websites unpublished |
 | `GET /api/library?project=:id` | Designs with current file inventories |
 | `POST /api/library` | Create/update metadata and upload files, ZIP, and entry point |
 | `PATCH /api/library` | Change the organisational status |

@@ -21,10 +21,13 @@ export async function GET(req: Request) {
     if (!site) fail(403, "Unknown hostname");
     const found = site.revision
       ? await rows(
-          "SELECT design_id FROM revisions WHERE design_id=? AND revision=?",
+          "SELECT r.design_id FROM revisions r JOIN designs d ON d.id=r.design_id JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE r.design_id=? AND r.revision=?",
           [site.id, site.revision],
         )
-      : await rows("SELECT id FROM designs WHERE id=?", [site.id]);
+      : await rows(
+          "SELECT d.id FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE d.id=?",
+          [site.id],
+        );
     if (!found.length) fail(403, "Unknown website");
     return new Response(null, { status: 204 });
   });

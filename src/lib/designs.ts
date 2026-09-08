@@ -6,7 +6,7 @@ export function siteUrl(id: string, revision?: number) {
 }
 export async function getProject(id: string): Promise<Project> {
   const data = await rows<Project>(
-    "SELECT id,name,site,developer,launch_window AS `window`,units,details,folder_url AS folderUrl,client,updated_at AS updated FROM projects WHERE id=?",
+    "SELECT id,name,site,developer,launch_window AS `window`,units,details,folder_url AS folderUrl,client,updated_at AS updated FROM projects WHERE id=? AND deleted_at IS NULL",
     [id],
   );
   if (!data[0]) fail(404, "Project not found");
@@ -15,7 +15,7 @@ export async function getProject(id: string): Promise<Project> {
 }
 export async function listDesigns(project: string) {
   const data = await rows<Design & { manifest: Entry[] | string | null }>(
-    `SELECT d.id,d.project_id AS project,d.name,d.format,d.source_url AS url,d.status,d.revision,d.updated_at AS updated,d.published_revision AS publishedRevision,d.published_at AS published,r.entry_point AS entryPoint,r.manifest FROM designs d LEFT JOIN revisions r ON r.design_id=d.id AND r.revision=d.revision WHERE d.project_id=? ORDER BY d.updated_at DESC`,
+    `SELECT d.id,d.project_id AS project,d.name,d.format,d.source_url AS url,d.status,d.revision,d.updated_at AS updated,d.published_revision AS publishedRevision,d.published_at AS published,r.entry_point AS entryPoint,r.manifest FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL LEFT JOIN revisions r ON r.design_id=d.id AND r.revision=d.revision WHERE d.project_id=? ORDER BY d.updated_at DESC`,
     [project],
   );
   return data.map(({ manifest, ...d }) => ({
@@ -36,7 +36,7 @@ export async function getRevision(
   revision: number,
 ): Promise<Revision> {
   const result = await rows<Revision>(
-    "SELECT design_id AS designId,revision,storage_path AS storagePath,entry_point AS entryPoint,manifest AS entries FROM revisions WHERE design_id=? AND revision=?",
+    "SELECT r.design_id AS designId,r.revision,r.storage_path AS storagePath,r.entry_point AS entryPoint,r.manifest AS entries FROM revisions r JOIN designs d ON d.id=r.design_id JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE r.design_id=? AND r.revision=?",
     [id, revision],
   );
   if (!result[0]) fail(404, "Revision not found");

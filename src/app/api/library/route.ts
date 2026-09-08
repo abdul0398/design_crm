@@ -74,6 +74,11 @@ export async function POST(req: Request) {
     try {
       connection = await db().getConnection();
       await connection.beginTransaction();
+      const [activeProject] = await connection.execute<RowDataPacket[]>(
+        "SELECT id FROM projects WHERE id=? AND deleted_at IS NULL FOR SHARE",
+        [meta.project],
+      );
+      if (!activeProject.length) fail(404, "Project not found");
       const id = meta.id || randomUUID();
       let revision = 0;
       if (meta.id) {
@@ -128,7 +133,7 @@ export async function PATCH(req: Request) {
     await requireUser(req);
     const value = z.object({ id: z.uuid(), status }).parse(await bodyJson(req));
     const [result] = await db().execute(
-      "UPDATE designs SET status=? WHERE id=?",
+      "UPDATE designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL SET d.status=? WHERE d.id=?",
       [value.status, value.id],
     );
     if (!(result as { affectedRows: number }).affectedRows)

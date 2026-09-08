@@ -25,7 +25,7 @@ export async function GET(
       published_revision: number | null;
       published_path: string | null;
     }>(
-      "SELECT project_id,published_revision,published_path FROM designs WHERE id=?",
+      "SELECT d.project_id,d.published_revision,d.published_path FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE d.id=?",
       [site.id],
     );
     if (!design) fail(404, "Website not found");

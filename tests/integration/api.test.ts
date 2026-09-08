@@ -63,6 +63,7 @@ const userId = randomUUID(),
 let cookie = "",
   designId = "";
 const storedPaths = new Set<string>();
+const extraProjects = new Set<string>();
 const headers = () => ({ host: new URL(origin).host, origin, cookie });
 const send = (path: string, method = "GET", body?: unknown) =>
   transport(endpoint + path, {
@@ -102,6 +103,8 @@ after(async () => {
       await db().execute("DELETE FROM designs WHERE id=?", [designId]);
     }
     await db().execute("DELETE FROM projects WHERE id=?", [projectId]);
+    for (const id of extraProjects)
+      await db().execute("DELETE FROM projects WHERE id=?", [id]);
     await db().execute("DELETE FROM users WHERE id=?", [userId]);
     for (const p of storedPaths) await discard(p);
   } finally {
@@ -179,6 +182,65 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       assert.equal((await send("/api/projects")).status, 200);
     },
   );
+  await t.test("project create, edit, trash and restore", async () => {
+    const basic = {
+      name: "QC New Project",
+      site: "New location",
+      developer: "New developer",
+      window: "Upcoming",
+    };
+    assert.equal(
+      (await send("/api/projects", "POST", { ...basic, name: "   " })).status,
+      400,
+    );
+    const create = await send("/api/projects", "POST", basic);
+    assert.equal(create.status, 201, await create.clone().text());
+    const project = await create.json();
+    extraProjects.add(project.id);
+    assert.equal(project.client.agency, "ERA");
+    const edit = await send("/api/projects/" + project.id, "PUT", {
+      ...project,
+      name: "QC Renamed Project",
+      site: "Changed location",
+      developer: "Changed developer",
+      window: "Launched today",
+    });
+    assert.equal(edit.status, 200);
+    assert.equal((await edit.json()).name, "QC Renamed Project");
+    assert.equal(
+      (
+        await send("/api/projects/" + project.id, "DELETE", {
+          name: basic.name,
+        })
+      ).status,
+      409,
+    );
+    assert.equal(
+      (
+        await send("/api/projects/" + project.id, "DELETE", {
+          name: "QC Renamed Project",
+        })
+      ).status,
+      200,
+    );
+    assert.equal((await send("/api/projects/" + project.id)).status, 404);
+    assert.ok(
+      !(await (await send("/api/projects")).json()).projects.some(
+        (p: { id: string }) => p.id === project.id,
+      ),
+    );
+    assert.ok(
+      (await (await send("/api/projects?trash=1")).json()).projects.some(
+        (p: { id: string }) => p.id === project.id,
+      ),
+    );
+    const restored = await send(
+      "/api/projects/" + project.id + "/restore",
+      "POST",
+    );
+    assert.equal(restored.status, 200);
+    assert.equal((await restored.json()).site, "Changed location");
+  });
   let previewUrl = "",
     previewCookie = "",
     liveUrl = "";
@@ -364,6 +426,79 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         await (await siteFetch(liveUrl + "/site/index.html")).text(),
         /First Client/,
       );
+    },
+  );
+  await t.test(
+    "project trash takes live pages and existing preview assets offline while retaining revisions",
+    async () => {
+      const p = await (await send("/api/projects/" + projectId)).json();
+      assert.equal(
+        (await send("/api/projects/" + projectId, "DELETE", { name: p.name }))
+          .status,
+        200,
+      );
+      assert.equal((await siteFetch(liveUrl + "/site/index.html")).status, 404);
+      assert.equal(
+        (
+          await siteFetch(
+            new URL(previewUrl).origin + "/site/assets/style.css",
+            previewCookie,
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (await send("/api/preview", "POST", { id: designId, revision: 2 }))
+          .status,
+        404,
+      );
+      assert.equal(
+        (await send("/api/publish", "POST", { id: designId, revision: 2 }))
+          .status,
+        404,
+      );
+      assert.equal(
+        (
+          await send("/api/library", "PATCH", {
+            id: designId,
+            status: "Active",
+          })
+        ).status,
+        404,
+      );
+      assert.equal(
+        (await (await send("/api/library?project=" + projectId)).json()).designs
+          .length,
+        0,
+      );
+      assert.equal(
+        (
+          await rows("SELECT revision FROM revisions WHERE design_id=?", [
+            designId,
+          ])
+        ).length,
+        2,
+      );
+      assert.equal(
+        (await send("/api/projects/" + projectId + "/restore", "POST")).status,
+        200,
+      );
+      assert.equal((await siteFetch(liveUrl + "/site/index.html")).status, 404);
+      const restored = (
+        await (await send("/api/library?project=" + projectId)).json()
+      ).designs[0];
+      assert.equal(restored.revision, 2);
+      assert.equal(restored.liveUrl, null);
+      assert.equal(
+        (await send("/api/publish", "POST", { id: designId, revision: 2 }))
+          .status,
+        200,
+      );
+      const [published] = await rows<{ published_path: string }>(
+        "SELECT published_path FROM designs WHERE id=?",
+        [designId],
+      );
+      storedPaths.add(published.published_path);
     },
   );
   await t.test(

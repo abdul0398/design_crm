@@ -22,6 +22,8 @@ import {
   Building2,
   Save,
   Menu,
+  Trash2,
+  RotateCcw,
 } from "lucide-react";
 import {
   agencies,
@@ -114,6 +116,104 @@ function Modal({
       </div>
       {children}
     </dialog>
+  );
+}
+function ProjectEditor({
+  project,
+  onClose,
+  onSaved,
+}: {
+  project: Project | null;
+  onClose: () => void;
+  onSaved: (project: Project) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    name: project?.name || "",
+    site: project?.site || "",
+    developer: project?.developer || "",
+    window: project?.window || "",
+  });
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await api(
+        project ? "/api/projects/" + project.id : "/api/projects",
+        json(project ? "PUT" : "POST", { ...project, ...draft }),
+      );
+      await onSaved(saved);
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      title={project ? "Edit project" : "Add project"}
+      onClose={onClose}
+      busy={busy}
+    >
+      <p className="dialog-subtitle">
+        {project
+          ? "Update the project information shown in your library and website templates."
+          : "Create a workspace for your designs, website files and client details."}
+      </p>
+      <form onSubmit={submit}>
+        <fieldset disabled={busy}>
+          <label>
+            Project name
+            <input
+              required
+              maxLength={150}
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              placeholder="e.g. New launch project"
+            />
+          </label>
+          <label>
+            Location
+            <input
+              maxLength={150}
+              value={draft.site}
+              onChange={(e) => setDraft({ ...draft, site: e.target.value })}
+              placeholder="Street or neighbourhood"
+            />
+          </label>
+          <label>
+            Developer
+            <input
+              maxLength={200}
+              value={draft.developer}
+              onChange={(e) =>
+                setDraft({ ...draft, developer: e.target.value })
+              }
+            />
+          </label>
+          <label>
+            Launch status / date
+            <input
+              maxLength={100}
+              value={draft.window}
+              onChange={(e) => setDraft({ ...draft, window: e.target.value })}
+              placeholder="e.g. Preview 15 October 2026"
+            />
+          </label>
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+          <button className="primary save" disabled={busy}>
+            {busy ? "Saving…" : project ? "Save project" : "Create project"}
+          </button>
+        </fieldset>
+      </form>
+    </Modal>
   );
 }
 function UploadEditor({
@@ -407,7 +507,7 @@ function UploadEditor({
 }
 export default function Desk({ loginName }: { loginName: string }) {
   const [nav, setNav] = useState<ProjectNav[]>([]),
-    [selected, setSelected] = useState("amberwood"),
+    [selected, setSelected] = useState(""),
     [project, setProject] = useState<Project | null>(null),
     [saved, setSaved] = useState(""),
     [designs, setDesigns] = useState<Design[]>([]),
@@ -421,33 +521,51 @@ export default function Desk({ loginName }: { loginName: string }) {
     [preview, setPreview] = useState<{ design: Design; url: string } | null>(
       null,
     ),
-    [menu, setMenu] = useState(false);
+    [menu, setMenu] = useState(false),
+    [projectEditor, setProjectEditor] = useState<{
+      project: Project | null;
+    } | null>(null),
+    [trash, setTrash] = useState<ProjectNav[] | null>(null),
+    [confirmation, setConfirmation] = useState<{
+      title: string;
+      message: string;
+      label: string;
+      run: () => Promise<void>;
+    } | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const dirty = !!project && JSON.stringify(project) !== saved;
   const refresh = useCallback(async () => {
     const id = selected;
-    const [library, items] = await Promise.all([
-      api("/api/library?project=" + id),
-      api("/api/projects"),
-    ]);
-    if (selectedRef.current === id) setDesigns(library.designs);
+    const items = await api("/api/projects");
+    if (selectedRef.current !== id) return false;
     setNav(items.projects);
+    if (!items.projects.some((p: ProjectNav) => p.id === id)) {
+      setSelected(items.projects[0]?.id || "");
+      setProject(null);
+      setSaved("");
+      setDesigns([]);
+      return false;
+    }
+    const library = await api("/api/library?project=" + id);
+    if (selectedRef.current === id) setDesigns(library.designs);
+    return true;
   }, [selected]);
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    const id = selected;
     try {
-      const id = selected;
-      const [p] = await Promise.all([api("/api/projects/" + id), refresh()]);
+      if (!(await refresh()) || !id || selectedRef.current !== id) return;
+      const p = await api("/api/projects/" + id);
       if (selectedRef.current === id) {
         setProject(p);
         setSaved(JSON.stringify(p));
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (selectedRef.current === id) setError((e as Error).message);
     } finally {
-      if (selectedRef.current === selected) setLoading(false);
+      if (selectedRef.current === id) setLoading(false);
     }
   }, [selected, refresh]);
   useEffect(() => {
@@ -479,15 +597,56 @@ export default function Desk({ loginName }: { loginName: string }) {
       setBusy(false);
     }
   }
-  function switchProject(id: string) {
-    if (id === selected) return;
-    if (dirty && !window.confirm("Discard unsaved project and client changes?"))
-      return;
+  function selectProject(id: string) {
     setSelected(id);
     setProject(null);
+    setSaved("");
+    setDesigns([]);
     setFilter("All");
     setNotice("");
     setMenu(false);
+  }
+  function switchProject(id: string) {
+    if (id === selected) return;
+    if (dirty) {
+      setConfirmation({
+        title: "Discard unsaved changes?",
+        message: "Your project and client changes have not been saved.",
+        label: "Discard changes",
+        run: async () => selectProject(id),
+      });
+    } else selectProject(id);
+  }
+  async function projectSaved(p: Project) {
+    const items = await api("/api/projects");
+    setNav(items.projects);
+    setSearch("");
+    setMenu(false);
+    if (p.id === selected) {
+      setProject(p);
+      setSaved(JSON.stringify(p));
+    } else selectProject(p.id);
+    setNotice("Project saved.");
+  }
+  function deleteProject() {
+    if (!project) return;
+    const target = project;
+    setConfirmation({
+      title: "Delete project?",
+      message: `Move “${target.name}” and its designs to Trash? Published websites will go offline. Files are kept so you can restore the project. Unsaved changes will be discarded.`,
+      label: "Move to Trash",
+      run: async () => {
+        await api(
+          "/api/projects/" + target.id,
+          json("DELETE", { name: target.name }),
+        );
+        const items = await api("/api/projects");
+        setNav(items.projects);
+        setSearch("");
+        selectProject(items.projects[0]?.id || "");
+        setNotice("Project moved to Trash. Its websites are offline.");
+      },
+    });
   }
   async function saveProject(e: FormEvent) {
     e.preventDefault();
@@ -518,6 +677,34 @@ export default function Desk({ loginName }: { loginName: string }) {
         <div className="nav-content">
           <div className="nav-label">
             PROJECT LIBRARY <span>{nav.length}</span>
+          </div>
+          <div className="project-library-actions">
+            <button
+              className="primary"
+              disabled={busy || dirty}
+              title={dirty ? "Save project changes first" : undefined}
+              onClick={() => {
+                setProjectEditor({ project: null });
+                setMenu(false);
+              }}
+            >
+              <Plus size={16} />
+              Add project
+            </button>
+            <button
+              className="secondary"
+              disabled={busy || dirty}
+              onClick={() =>
+                void action(async () => {
+                  const items = await api("/api/projects?trash=1");
+                  setTrash(items.projects);
+                  setMenu(false);
+                })
+              }
+            >
+              <Trash2 size={15} />
+              Trash
+            </button>
           </div>
           <div className="project-search">
             <Search size={15} />
@@ -560,15 +747,19 @@ export default function Desk({ loginName }: { loginName: string }) {
             className="icon-button"
             aria-label="Sign out"
             onClick={() => {
-              if (
-                dirty &&
-                !window.confirm("Discard unsaved changes and sign out?")
-              )
-                return;
-              void action(async () => {
+              const logout = async () => {
                 await api("/api/auth/logout", { method: "POST" });
                 window.location.assign("/login");
-              });
+              };
+              if (dirty)
+                setConfirmation({
+                  title: "Sign out?",
+                  message:
+                    "Your unsaved project and client changes will be discarded.",
+                  label: "Discard and sign out",
+                  run: logout,
+                });
+              else void action(logout);
             }}
           >
             <LogOut size={17} />
@@ -608,7 +799,22 @@ export default function Desk({ loginName }: { loginName: string }) {
               {notice}
             </div>
           )}
-          {loading || !project ? (
+          {!loading && !project && !error && nav.length === 0 ? (
+            <section className="empty-state">
+              <h1>Your project library is empty</h1>
+              <p>
+                Add a project to start organising designs, or restore one from
+                Trash.
+              </p>
+              <button
+                className="primary"
+                onClick={() => setProjectEditor({ project: null })}
+              >
+                <Plus size={16} />
+                Add project
+              </button>
+            </section>
+          ) : loading || !project ? (
             <section className="loading-project">
               <h2>
                 {error
@@ -629,10 +835,29 @@ export default function Desk({ loginName }: { loginName: string }) {
                   </p>
                 </div>
                 <div className="project-heading-meta">
+                  <div className="project-heading-actions">
+                    <button
+                      className="secondary"
+                      disabled={busy || dirty}
+                      title={dirty ? "Save project changes first" : undefined}
+                      onClick={() => setProjectEditor({ project })}
+                    >
+                      <Pencil size={14} />
+                      Edit project
+                    </button>
+                    <button
+                      className="secondary danger"
+                      disabled={busy}
+                      onClick={deleteProject}
+                    >
+                      <Trash2 size={14} />
+                      Delete project
+                    </button>
+                  </div>
                   <span
                     className={
                       "launch-pill " +
-                      (project.id === "dunearn" ? "launched" : "")
+                      (/^launched\b/i.test(project.window) ? "launched" : "")
                     }
                   >
                     {project.window}
@@ -1146,8 +1371,12 @@ export default function Desk({ loginName }: { loginName: string }) {
                         className="secondary"
                         disabled={busy}
                         onClick={() => {
-                          if (window.confirm("Take this website offline?"))
-                            void action(async () => {
+                          setConfirmation({
+                            title: "Unpublish website?",
+                            message:
+                              "This website will go offline. Its files and revisions will remain available.",
+                            label: "Unpublish",
+                            run: async () => {
                               await api(
                                 "/api/publish",
                                 json("DELETE", { id: preview.design.id }),
@@ -1155,7 +1384,8 @@ export default function Desk({ loginName }: { loginName: string }) {
                               await refresh();
                               setPreview(null);
                               setNotice("Website unpublished.");
-                            });
+                            },
+                          });
                         }}
                       >
                         Unpublish
@@ -1199,6 +1429,95 @@ export default function Desk({ loginName }: { loginName: string }) {
           )}
         </div>
       </main>
+      {projectEditor && (
+        <ProjectEditor
+          project={projectEditor.project}
+          onClose={() => setProjectEditor(null)}
+          onSaved={projectSaved}
+        />
+      )}
+      {trash && (
+        <Modal title="Project Trash" onClose={() => setTrash(null)} busy={busy}>
+          <p className="dialog-subtitle">
+            Restore projects with their designs and files. Websites stay offline
+            until you publish them again.
+          </p>
+          {!trash.length ? (
+            <p>Trash is empty.</p>
+          ) : (
+            <ul className="trash-list">
+              {trash.map((p) => (
+                <li key={p.id}>
+                  <div>
+                    <strong>{p.name}</strong>
+                    <small>{p.count} designs</small>
+                  </div>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      void action(async () => {
+                        const restored = await api(
+                          "/api/projects/" + p.id + "/restore",
+                          { method: "POST" },
+                        );
+                        await projectSaved(restored);
+                        setTrash(null);
+                        setNotice(
+                          "Project restored. Publish its websites when ready.",
+                        );
+                      })
+                    }
+                  >
+                    <RotateCcw size={14} />
+                    Restore {p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+        </Modal>
+      )}
+      {confirmation && (
+        <Modal
+          title={confirmation.title}
+          onClose={() => setConfirmation(null)}
+          busy={busy}
+        >
+          <p className="dialog-subtitle">{confirmation.message}</p>
+          <div className="confirmation-actions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setConfirmation(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary danger"
+              disabled={busy}
+              onClick={() =>
+                void action(async () => {
+                  await confirmation.run();
+                  setConfirmation(null);
+                })
+              }
+            >
+              {busy ? "Working…" : confirmation.label}
+            </button>
+          </div>
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
+            </p>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
