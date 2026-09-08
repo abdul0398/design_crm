@@ -1,0 +1,14 @@
+# Use when another Caddy container already owns ports 80/443 on this EC2 instance.
+services:
+  caddy:
+    ports: !reset []
+    volumes:
+      - ./deploy/Caddyfile.shared:/etc/caddy/Caddyfile:ro
+    networks:
+      default: {}
+      edge:
+        aliases: [design-crm-gateway]
+networks:
+  edge:
+    external: true
+    name: ${CADDY_NETWORK:?Set CADDY_NETWORK to the existing Caddy Docker network}

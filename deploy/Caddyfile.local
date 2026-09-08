@@ -1,0 +1,11 @@
+# Local Docker verification over HTTP. Production uses deploy/Caddyfile.
+:80 {
+	@private path /api/tls/allow
+	respond @private 404
+	request_body {
+		max_size 55MB
+	}
+	reverse_proxy app:3000 {
+		header_up Host {http.request.hostport}
+	}
+}

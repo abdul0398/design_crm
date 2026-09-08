@@ -1,0 +1,85 @@
+name: launch-desk
+x-app-env: &app-env
+  DATABASE_URL: mysql://${MYSQL_USER:?Set MYSQL_USER}:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-launch}
+  APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN}
+  SITE_BASE_DOMAIN: ${SITE_BASE_DOMAIN:?Set SITE_BASE_DOMAIN}
+  SITE_PROTOCOL: ${SITE_PROTOCOL:-https}
+  SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
+  TLS_ASK_SECRET: ${TLS_ASK_SECRET:?Set TLS_ASK_SECRET}
+  STORAGE_ROOT: /data/websites
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-launch}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - ${DATA_ROOT:-./data}/mysql:/var/lib/mysql
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$$MYSQL_USER" "$$MYSQL_DATABASE" -e "SELECT 1" >/dev/null 2>&1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci]
+  storage-init:
+    image: busybox:1.37
+    user: root
+    volumes:
+      - ${DATA_ROOT:-./data}/websites:/data/websites
+    command: [sh, -c, 'chown 1001:1001 /data/websites && chmod 750 /data/websites']
+  migrate:
+    build:
+      context: .
+      target: tooling
+    environment: *app-env
+    depends_on:
+      db: {condition: service_healthy}
+    restart: 'no'
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    environment: *app-env
+    volumes:
+      - ${DATA_ROOT:-./data}/websites:/data/websites
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      storage-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:3000/api/health",{headers:{host:new URL(process.env.APP_ORIGIN).host}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_HOST: ${APP_HOST:-launch.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      TLS_ASK_SECRET: ${TLS_ASK_SECRET:?Set TLS_ASK_SECRET}
+    ports:
+      - '${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80'
+      - '${HTTP_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443'
+      - '${HTTP_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443/udp'
+    volumes:
+      - ${CADDYFILE:-./deploy/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ${DATA_ROOT:-./data}/caddy/data:/data
+      - ${DATA_ROOT:-./data}/caddy/config:/config
+    depends_on:
+      app: {condition: service_healthy}
+  admin:
+    profiles: [tools]
+    build:
+      context: .
+      target: tooling
+    environment: *app-env
+    command: [npm, run, admin:create]
+    depends_on:
+      migrate: {condition: service_completed_successfully}

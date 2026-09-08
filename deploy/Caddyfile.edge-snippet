@@ -1,0 +1,20 @@
+# Merge the on_demand_tls setting into the EXISTING global options block.
+# Do not create a second global options block if one already exists.
+{
+	on_demand_tls {
+		ask http://design-crm-gateway:8081
+	}
+}
+
+design-crm.datapoco.ai {
+	encode zstd gzip
+	reverse_proxy design-crm-gateway:80
+}
+
+# Existing named host blocks take precedence over this on-demand catch-all.
+https:// {
+	tls {
+		on_demand
+	}
+	reverse_proxy design-crm-gateway:80
+}

@@ -1,0 +1,7 @@
+node_modules
+.next
+data
+storage
+backups
+package-lock.json
+src/app/globals.css

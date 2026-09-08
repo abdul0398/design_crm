@@ -1,0 +1,33 @@
+{
+	email {$ACME_EMAIL}
+	on_demand_tls {
+		ask http://app:3000/api/tls/allow?token={$TLS_ASK_SECRET}
+	}
+}
+
+(launch_app) {
+	# Certificate permission checks are available only on the private Docker network.
+	@private path /api/tls/allow
+	respond @private 404
+	request_body {
+		max_size 55MB
+	}
+	encode zstd gzip
+	reverse_proxy app:3000 {
+		header_up Host {http.request.host}
+		transport http {
+			response_header_timeout 180s
+		}
+	}
+}
+
+{$APP_HOST} {
+	import launch_app
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+	import launch_app
+}

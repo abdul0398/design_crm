@@ -1,0 +1,5 @@
+# Use only for local Next.js development: docker compose -f compose.yaml -f compose.dev.yaml up -d db
+services:
+  db:
+    ports:
+      - '127.0.0.1:${DB_PORT:-3307}:3306'

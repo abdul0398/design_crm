@@ -1,0 +1,21 @@
+# Private gateway behind an existing Caddy HTTPS listener. No published ports.
+:80 {
+	@private path /api/tls/allow
+	respond @private 404
+	request_body {
+		max_size 55MB
+	}
+	reverse_proxy app:3000 {
+		header_up Host {http.request.hostport}
+		transport http {
+			response_header_timeout 180s
+		}
+	}
+}
+
+# Only the existing Caddy gateway uses this private certificate-permission port.
+# Keep the secret in this container's environment, not the shared Caddyfile.
+:8081 {
+	rewrite * /api/tls/allow?token={$TLS_ASK_SECRET}&{http.request.uri.query}
+	reverse_proxy app:3000
+}
