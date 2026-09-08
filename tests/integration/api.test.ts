@@ -15,7 +15,14 @@ async function transport(
     const run = input.startsWith("https:") ? httpsRequest : httpRequest;
     const outgoing = run(
       input,
-      { method: request.method, headers: Object.fromEntries(request.headers) },
+      {
+        method: request.method,
+        headers: Object.fromEntries(request.headers),
+        // Keep TLS SNI on the target URL while separately testing a hostile HTTP Host.
+        ...(input.startsWith("https:")
+          ? { servername: new URL(input).hostname }
+          : {}),
+      },
       (response) => {
         const chunks: Buffer[] = [];
         response.on("data", (chunk) => chunks.push(chunk));
@@ -143,13 +150,12 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
     cookie = login.headers.get("set-cookie")!.split(";")[0];
     assert.ok(cookie);
     assert.equal((await send("/api/projects")).status, 200);
-    assert.equal(
-      (
-        await transport(endpoint + "/api/projects", {
-          headers: { host: "attacker.invalid", cookie },
-        })
-      ).status,
-      404,
+    const invalidHost = await transport(endpoint + "/api/projects", {
+      headers: { host: "attacker.invalid", cookie },
+    });
+    assert.ok(
+      [403, 404, 421].includes(invalidHost.status),
+      "Unknown hosts must be rejected by the gateway or application",
     );
   });
   let previewUrl = "",
