@@ -30,7 +30,7 @@ HTTPS_PORT=443
 
 Use `openssl rand -hex 24` for passwords and `openssl rand -hex 32` for secrets. Hex passwords avoid escaping issues in the database URL. Compose supplies its internal `DATABASE_URL`; local CLI scripts use the local `.env` value. Never put `.env` in Git or images.
 
-Caddy obtains the admin certificate automatically. Website and preview certificates are issued on their first HTTPS connection. Its private `ask` endpoint permits only stored design/revision hostnames and requires `TLS_ASK_SECRET`; public access to that endpoint is blocked by Caddy. Wildcard **DNS** is required, but this configuration uses individual certificates, so no DNS-provider API key is needed. The first preview can take several seconds while its certificate is issued. Certificate-authority rate limits apply when many new designs/revisions are opened. For high-volume operation, use a Caddy DNS-provider module and a wildcard certificate once the DNS provider is known.
+Caddy obtains the admin certificate automatically. Website and preview certificates are issued on their first HTTPS connection. Its private `ask` endpoint permits only stored design and private-preview hostnames and requires `TLS_ASK_SECRET`; public access to that endpoint is blocked by Caddy. Wildcard **DNS** is required, but this configuration uses individual certificates, so no DNS-provider API key is needed. The first preview can take several seconds while its certificate is issued. Certificate-authority rate limits apply when many new designs are opened. For high-volume operation, use a Caddy DNS-provider module and a wildcard certificate once the DNS provider is known.
 
 This follows Caddy's [automatic HTTPS](https://caddyserver.com/docs/automatic-https) and [on-demand certificate permission](https://caddyserver.com/docs/caddyfile/options#on-demand-tls) documentation.
 
@@ -57,7 +57,7 @@ docker compose --profile tools run --rm -e ADMIN_EMAIL -e ADMIN_PASSWORD admin
 unset ADMIN_EMAIL ADMIN_PASSWORD
 ```
 
-Visit `https://desk.example.com`. Upload a website and preview it. Check CSS, images, and nested pages. Click Publish, then use the external link in the design row. Verify that unpublished websites return 404. CEA/agency information comes from the supplied prototype and should be reviewed before publication.
+Visit `https://desk.example.com`. Upload a website and open its stable live URL using the external link in the design row. Check CSS, images, and nested pages. Replace a file and verify that the same URL serves the update immediately. Verify that explicitly unpublished websites return 404.
 
 For a Docker-only local trial, set `CADDYFILE=./deploy/Caddyfile.local` and `HTTPS_PORT=8443`, use `APP_ORIGIN=http://launch.localhost:8080`, `SITE_BASE_DOMAIN=launch.localhost:8080`, `SITE_PROTOCOL=http`, and `HTTP_PORT=8080`, and run Compose normally. This local Caddyfile serves HTTP without requesting public certificates. Restart/recreate the containers whenever these environment values change. The production image reads these values at runtime.
 
@@ -95,14 +95,14 @@ docker compose run --rm --no-deps -T --entrypoint tar app -C /data/websites -xzf
 docker compose up -d app caddy
 ```
 
-Do not extract untrusted backup archives. Test restorations periodically and verify both a published website and a saved revision.
+Do not extract untrusted backup archives. Test restorations periodically and verify both a published website and an offline preview.
 
 ## Operational boundaries
 
 - All authenticated users are workspace administrators. There is no per-client tenancy or role-based permission system.
 - Filesystem storage assumes one writable application instance. Multiple instances would need shared filesystem storage and coordinated deployment/migrations.
 - Static websites are supported. Upload a built static export from a framework; uploaded application servers are not launched.
-- The current release retains every revision and publication snapshot. Add disk alarms and a database-aware retention process before sustained large uploads.
+- File updates replace the current file set and remove unreferenced replaced directories. Legacy history remains untouched. Add disk alarms and database-aware cleanup for crash leftovers and legacy files.
 - No AWS resources or domain records are provisioned by this repository. Actual deployment requires your EC2 environment, DNS, and TLS configuration.
 
 ## Existing shared Caddy on this EC2 instance

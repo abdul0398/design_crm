@@ -1,3 +1,4 @@
+import type { PoolConnection } from "mysql2/promise";
 import { rows, jsonValue } from "./db";
 import type { Design, Project, Entry } from "./catalog";
 import { fail } from "./http";
@@ -6,11 +7,10 @@ export function siteUrl(id: string, revision?: number) {
 }
 export async function getProject(id: string): Promise<Project> {
   const data = await rows<Project>(
-    "SELECT id,name,site,developer,launch_window AS `window`,units,details,folder_url AS folderUrl,client,updated_at AS updated FROM projects WHERE id=? AND deleted_at IS NULL",
+    "SELECT id,name,site,developer,launch_window AS `window`,updated_at AS updated FROM projects WHERE id=? AND deleted_at IS NULL",
     [id],
   );
   if (!data[0]) fail(404, "Project not found");
-  data[0].client = jsonValue(data[0].client);
   return data[0];
 }
 export async function listDesigns(project: string, trash = false) {
@@ -34,11 +34,14 @@ export type Revision = {
 export async function getRevision(
   id: string,
   revision: number,
+  connection?: PoolConnection,
 ): Promise<Revision> {
-  const result = await rows<Revision>(
-    "SELECT r.design_id AS designId,r.revision,r.storage_path AS storagePath,r.entry_point AS entryPoint,r.manifest AS entries FROM revisions r JOIN designs d ON d.id=r.design_id JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE r.design_id=? AND r.revision=? AND d.deleted_at IS NULL",
-    [id, revision],
-  );
+  const query =
+    "SELECT r.design_id AS designId,r.revision,r.storage_path AS storagePath,r.entry_point AS entryPoint,r.manifest AS entries FROM revisions r JOIN designs d ON d.id=r.design_id JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE r.design_id=? AND r.revision=? AND d.deleted_at IS NULL";
+  const values = [id, revision];
+  const result = connection
+    ? ((await connection.execute(query, values))[0] as Revision[])
+    : await rows<Revision>(query, values);
   if (!result[0]) fail(404, "Revision not found");
   return { ...result[0], entries: jsonValue(result[0].entries) };
 }

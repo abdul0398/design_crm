@@ -3,9 +3,8 @@ import type { RowDataPacket } from "mysql2";
 import { endpoint, bodyJson, fail } from "@/lib/http";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { getProject, getRevision, siteUrl } from "@/lib/designs";
-import { snapshot, discard } from "@/lib/storage";
-import { templateValues, renderTemplate } from "@/lib/templates";
+import { getRevision, siteUrl } from "@/lib/designs";
+import { discardUnused } from "@/lib/current-files";
 export async function POST(req: Request) {
   return endpoint(async () => {
     await requireUser(req);
@@ -13,7 +12,7 @@ export async function POST(req: Request) {
       .object({ id: z.uuid(), revision: z.number().int().positive() })
       .parse(await bodyJson(req));
     const connection = await db().getConnection();
-    let destination: string | undefined;
+    let retired: string[] = [];
     let committed = false;
     try {
       await connection.beginTransaction();
@@ -24,18 +23,12 @@ export async function POST(req: Request) {
       const design = data[0];
       if (!design) fail(404, "Design not found");
       if (design.revision !== revision)
-        fail(
-          409,
-          "A newer revision exists. Refresh and preview it before publishing.",
-        );
-      const r = await getRevision(id, revision),
-        values = templateValues(await getProject(design.project_id));
-      destination = await snapshot(r.storagePath, r.entries, (html) =>
-        renderTemplate(html, values),
-      );
+        fail(409, "This website changed. Refresh before making it live.");
+      const r = await getRevision(id, revision, connection);
+      if (design.published_path) retired = [design.published_path];
       await connection.execute(
         "UPDATE designs SET published_revision=?,published_path=?,published_at=UTC_TIMESTAMP(3) WHERE id=?",
-        [revision, destination, id],
+        [revision, r.storagePath, id],
       );
       await connection.commit();
       committed = true;
@@ -45,7 +38,7 @@ export async function POST(req: Request) {
       throw e;
     } finally {
       connection.release();
-      if (destination && !committed) await discard(destination);
+      if (committed) await discardUnused(retired);
     }
   });
 }

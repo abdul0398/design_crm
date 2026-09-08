@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { listDesigns, getProject } from "@/lib/designs";
 import { storeUpload, discard } from "@/lib/storage";
+import { saveCurrentFiles, discardUnused } from "@/lib/current-files";
 const status = z.enum(["Unused", "Active", "Suspended"]);
 const fields = z.object({
   id: z.uuid().optional(),
@@ -72,6 +73,7 @@ export async function POST(req: Request) {
     const upload = await storeUpload(form);
     let connection;
     let committed = false;
+    let retired: string[] = [];
     try {
       connection = await db().getConnection();
       await connection.beginTransaction();
@@ -82,13 +84,15 @@ export async function POST(req: Request) {
       if (!activeProject.length) fail(404, "Project not found");
       const id = meta.id || randomUUID();
       let revision = 0;
+      let live = true;
       if (meta.id) {
         const [found] = await connection.execute<RowDataPacket[]>(
-          "SELECT revision FROM designs WHERE id=? AND project_id=? AND deleted_at IS NULL FOR UPDATE",
+          "SELECT revision,published_at FROM designs WHERE id=? AND project_id=? AND deleted_at IS NULL FOR UPDATE",
           [id, meta.project],
         );
         if (!found.length) fail(404, "Design not found");
         revision = found[0].revision;
+        live = !revision || !!found[0].published_at;
         if (revision !== meta.expectedRevision)
           fail(409, "This design changed. Refresh before uploading again.");
       }
@@ -100,18 +104,15 @@ export async function POST(req: Request) {
           [id, meta.project, meta.name, meta.format, meta.url, meta.status],
         );
       if (upload) {
-        revision++;
-        await connection.execute(
-          "INSERT INTO revisions(design_id,revision,storage_path,entry_point,manifest,byte_size) VALUES(?,?,?,?,?,?)",
-          [
-            id,
-            revision,
-            upload.storagePath,
-            upload.entryPoint,
-            JSON.stringify(upload.entries),
-            upload.bytes,
-          ],
+        const saved = await saveCurrentFiles(
+          connection,
+          id,
+          revision,
+          upload,
+          live,
         );
+        revision = saved.version;
+        retired = saved.retired;
       }
       await connection.execute(
         "UPDATE designs SET name=?,format=?,source_url=?,status=?,revision=? WHERE id=?",
@@ -126,6 +127,7 @@ export async function POST(req: Request) {
     } finally {
       connection?.release();
       if (upload && !committed) await discard(upload.storagePath);
+      if (committed) await discardUnused(retired);
     }
   });
 }

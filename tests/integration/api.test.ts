@@ -225,7 +225,8 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
     assert.equal(create.status, 201, await create.clone().text());
     const project = await create.json();
     extraProjects.add(project.id);
-    assert.equal(project.client.agency, "ERA");
+    assert.equal(project.client, undefined);
+    assert.equal(project.details, undefined);
     const edit = await send("/api/projects/" + project.id, "PUT", {
       ...project,
       name: "QC Renamed Project",
@@ -270,7 +271,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
     assert.equal((await restored.json()).site, "Changed location");
   });
   await t.test(
-    "individual file updates preserve other files, prior revisions and publication",
+    "file replacements update the same live URL without history or republishing",
     async () => {
       const createdProject = await send("/api/projects", "POST", {
         name: "File update QC project",
@@ -346,12 +347,17 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         ).status,
         403,
       );
-      const published = await send("/api/publish", "POST", { id, revision: 1 });
-      assert.equal(published.status, 200);
-      const url = (await published.json()).url;
-      const originalPublicHtml = await (
-        await siteFetch(url + "/site/index.html")
-      ).text();
+      const library = await (
+        await send("/api/library?project=" + fileProject)
+      ).json();
+      const url = library.designs.find(
+        (d: { id: string }) => d.id === id,
+      ).liveUrl;
+      assert.ok(url, "New uploaded websites are live immediately");
+      assert.equal(
+        await (await siteFetch(url + "/site/index.html")).text(),
+        html,
+      );
       const [before] = await rows<{ storage_path: string }>(
         "SELECT storage_path FROM revisions WHERE design_id=? AND revision=1",
         [id],
@@ -397,12 +403,9 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         ),
         "new-css",
       );
-      assert.equal(
-        await readFile(
-          diskPath(before.storage_path + "/site/assets/style.css"),
-          "utf8",
-        ),
-        "old-css",
+      await assert.rejects(
+        readFile(diskPath(before.storage_path + "/site/assets/style.css")),
+        { code: "ENOENT" },
       );
       assert.equal(
         await readFile(
@@ -417,7 +420,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       );
       assert.equal(
         await (await siteFetch(url + "/site/assets/style.css")).text(),
-        "old-css",
+        "new-css",
       );
       const changedHtml = await update(
         "site/index.html",
@@ -434,7 +437,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       assert.equal(changedBinary.status, 200);
       assert.equal(
         await (await siteFetch(url + "/site/index.html")).text(),
-        originalPublicHtml,
+        "<h1>Updated page</h1>",
       );
       const [last] = await rows<{ storage_path: string }>(
         "SELECT storage_path FROM revisions WHERE design_id=? AND revision=4",
@@ -451,41 +454,69 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         ),
         "new-css",
       );
-      const [oldPublication] = await rows<{ published_path: string }>(
-        "SELECT published_path FROM designs WHERE id=?",
+      const records = await rows(
+        "SELECT revision FROM revisions WHERE design_id=?",
         [id],
       );
-      storedPaths.add(oldPublication.published_path);
+      assert.equal(records.length, 1, "Updates do not create history records");
       assert.equal(
-        (await send("/api/publish", "POST", { id, revision: 4 })).status,
+        (await (await send("/api/preview", "POST", { id, revision: 4 })).json())
+          .url,
+        url,
+      );
+      const simultaneous = await Promise.all([
+        update("site/assets/style.css", 4, new File(["race-a"], "a.css")),
+        update("site/assets/style.css", 4, new File(["race-b"], "b.css")),
+      ]);
+      assert.deepEqual(simultaneous.map((r) => r.status).sort(), [200, 409]);
+      assert.match(
+        await (await siteFetch(url + "/site/assets/style.css")).text(),
+        /^race-[ab]$/,
+      );
+      assert.equal((await send("/api/publish", "DELETE", { id })).status, 200);
+      const previewBefore = (
+        await (await send("/api/preview", "POST", { id, revision: 5 })).json()
+      ).url;
+      assert.equal(
+        (
+          await update(
+            "site/index.html",
+            5,
+            new File(["<h1>Offline update</h1>"], "index.html"),
+          )
+        ).status,
         200,
       );
-      assert.match(
-        await (await siteFetch(url + "/site/index.html")).text(),
-        /<h1>Updated page<\/h1>/,
+      assert.equal(
+        (await siteFetch(url + "/site/index.html")).status,
+        404,
+        "Updating an explicitly offline site must not expose it",
       );
-      const [newPublication] = await rows<{ published_path: string }>(
-        "SELECT published_path FROM designs WHERE id=?",
-        [id],
+      const previewAfter = (
+        await (await send("/api/preview", "POST", { id, revision: 6 })).json()
+      ).url;
+      assert.equal(
+        new URL(previewBefore).origin,
+        new URL(previewAfter).origin,
+        "Private preview hostname stays the same",
       );
-      storedPaths.add(newPublication.published_path);
       assert.equal(
         (
           await send("/api/library", "DELETE", {
             id,
             name: "File update test",
-            expectedRevision: 4,
+            expectedRevision: 6,
           })
         ).status,
         200,
       );
       const [paths] = await rows<{ storage_path: string }>(
-        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=4",
+        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=6",
         [id],
       );
       assert.ok(paths.storage_path);
       assert.equal(
-        (await update("site/index.html", 4, new File(["blocked"], "x"))).status,
+        (await update("site/index.html", 6, new File(["blocked"], "x"))).status,
         404,
       );
     },
@@ -552,6 +583,10 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
   await t.test(
     "private preview serves HTML and nested assets on its own host",
     async () => {
+      assert.equal(
+        (await send("/api/publish", "DELETE", { id: designId })).status,
+        200,
+      );
       const preview = await send("/api/preview", "POST", {
         id: designId,
         revision: 1,
@@ -575,7 +610,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         previewCookie,
       );
       assert.equal(html.status, 200);
-      assert.match(await html.text(), /First Client/);
+      assert.match(await html.text(), /\{\{client_name\}\}/);
       assert.equal(
         (
           await siteFetch(
@@ -600,44 +635,47 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       );
     },
   );
-  await t.test("publication is public and freezes client details", async () => {
-    const publish = await send("/api/publish", "POST", {
-      id: designId,
-      revision: 1,
-    });
-    assert.equal(publish.status, 200, await publish.clone().text());
-    liveUrl = (await publish.json()).url;
-    const [published] = await rows<{ published_path: string }>(
-      "SELECT published_path FROM designs WHERE id=?",
-      [designId],
-    );
-    storedPaths.add(published.published_path);
-    const response = await siteFetch(liveUrl + "/site/index.html");
-    assert.equal(response.status, 200);
-    assert.match(await response.text(), /First Client/);
-    const update = await send("/api/projects/" + projectId, "PUT", {
-      units: "100",
-      details: "Saved project information",
-      folderUrl: "https://example.com/folder",
-      client: { ...client, name: "Second Client" },
-    });
-    assert.equal(update.status, 200);
-    assert.match(
-      await (await siteFetch(liveUrl + "/site/index.html")).text(),
-      /First Client/,
-    );
-    assert.match(
-      await (
-        await siteFetch(
-          new URL(previewUrl).origin + "/site/index.html",
-          previewCookie,
-        )
-      ).text(),
-      /Second Client/,
-    );
-  });
   await t.test(
-    "replacement keeps history and rejects stale revisions",
+    "websites serve uploaded HTML unchanged without metadata substitutions",
+    async () => {
+      const publish = await send("/api/publish", "POST", {
+        id: designId,
+        revision: 1,
+      });
+      assert.equal(publish.status, 200, await publish.clone().text());
+      liveUrl = (await publish.json()).url;
+      const [published] = await rows<{ published_path: string }>(
+        "SELECT published_path FROM designs WHERE id=?",
+        [designId],
+      );
+      storedPaths.add(published.published_path);
+      const response = await siteFetch(liveUrl + "/site/index.html");
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /\{\{client_name\}\}/);
+      const update = await send("/api/projects/" + projectId, "PUT", {
+        units: "100",
+        details: "Saved project information",
+        folderUrl: "https://example.com/folder",
+        client: { ...client, name: "Second Client" },
+      });
+      assert.equal(update.status, 200);
+      assert.match(
+        await (await siteFetch(liveUrl + "/site/index.html")).text(),
+        /\{\{client_name\}\}/,
+      );
+      assert.match(
+        await (
+          await siteFetch(
+            new URL(previewUrl).origin + "/site/index.html",
+            previewCookie,
+          )
+        ).text(),
+        /\{\{client_name\}\}/,
+      );
+    },
+  );
+  await t.test(
+    "whole website replacement updates the same URL and rejects stale edits",
     async () => {
       const form = new FormData();
       for (const [k, v] of Object.entries({
@@ -650,10 +688,16 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         expectedRevision: "1",
       }))
         form.set(k, v);
-      form.set(
-        "zip",
-        new File([await readFile("tests/fixtures/website.zip")], "website.zip"),
+      form.append(
+        "files",
+        new File(["<h1>Whole website replaced</h1>"], "index.html"),
       );
+      form.append("files", new File(["body{color:navy}"], "style.css"));
+      form.set(
+        "paths",
+        JSON.stringify(["site/index.html", "site/assets/style.css"]),
+      );
+      form.set("entryPoint", "site/index.html");
       const replacement = await transport(endpoint + "/api/library", {
         method: "POST",
         headers: headers(),
@@ -670,15 +714,32 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         "SELECT revision FROM revisions WHERE design_id=?",
         [designId],
       );
-      assert.equal(old.length, 2);
+      assert.equal(old.length, 1);
       assert.match(
         await (await siteFetch(liveUrl + "/site/index.html")).text(),
-        /First Client/,
+        /Whole website replaced/,
+      );
+      assert.equal(
+        await (await siteFetch(liveUrl + "/site/assets/style.css")).text(),
+        "body{color:navy}",
+      );
+      assert.equal(
+        (await siteFetch(liveUrl + "/site/assets/app.js")).status,
+        404,
+      );
+      assert.match(
+        await (
+          await siteFetch(
+            new URL(previewUrl).origin + "/site/index.html",
+            previewCookie,
+          )
+        ).text(),
+        /Whole website replaced/,
       );
     },
   );
   await t.test(
-    "project trash takes live pages and existing preview assets offline while retaining revisions",
+    "project trash takes live pages and existing preview assets offline while retaining current files",
     async () => {
       const p = await (await send("/api/projects/" + projectId)).json();
       assert.equal(
@@ -726,7 +787,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
             designId,
           ])
         ).length,
-        2,
+        1,
       );
       assert.equal(
         (await send("/api/projects/" + projectId + "/restore", "POST")).status,
@@ -880,7 +941,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       assert.equal(trash[0].id, designId);
       assert.equal(trash[0].revision, 2);
       const [revision] = await rows<{ storage_path: string }>(
-        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=1",
+        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=2",
         [designId],
       );
       assert.equal(
@@ -888,7 +949,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
           diskPath(revision.storage_path + "/site/assets/style.css"),
           "utf8",
         ),
-        "body{color:green}",
+        "body{color:navy}",
       );
       const project = await (await send("/api/projects/" + projectId)).json();
       assert.equal(

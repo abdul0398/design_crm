@@ -1,31 +1,30 @@
 import { cookies } from "next/headers";
-import { readFile, stat } from "node:fs/promises";
-import { createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { lookup } from "mime-types";
 import { endpoint, fail } from "@/lib/http";
 import { siteIdentity } from "@/lib/hosts";
 import { verifyPreview } from "@/lib/auth";
 import { rows } from "@/lib/db";
-import { getRevision, getProject } from "@/lib/designs";
+import { getRevision } from "@/lib/designs";
 import { safePath, diskPath } from "@/lib/storage";
-import { renderTemplate, templateValues } from "@/lib/templates";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ site: string; path?: string[] }> },
 ) {
-  return endpoint(async () => {
+  const serve = async () => {
     const p = await params,
       site = siteIdentity(req.headers.get("host") || "");
     if (!site || site.label !== p.site) fail(404, "Not found");
     const [design] = await rows<{
       project_id: string;
+      revision: number;
       published_revision: number | null;
       published_path: string | null;
     }>(
-      "SELECT d.project_id,d.published_revision,d.published_path FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE d.id=? AND d.deleted_at IS NULL",
+      "SELECT d.project_id,d.revision,d.published_revision,d.published_path FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE d.id=? AND d.deleted_at IS NULL",
       [site.id],
     );
     if (!design) fail(404, "Website not found");
@@ -74,7 +73,7 @@ export async function GET(
       fail(404, "This website is not published");
     const revision = await getRevision(
       site.id,
-      site.revision || design.published_revision!,
+      preview ? design.revision : design.published_revision!,
     );
     let file = p.path?.join("/") || revision.entryPoint;
     safePath(file);
@@ -114,21 +113,35 @@ export async function GET(
         "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads; frame-ancestors " +
         process.env.APP_ORIGIN,
     };
-    if (/\.html?$/i.test(file)) {
+    if (/\.html?$/i.test(file))
       headers["Content-Type"] = "text/html; charset=utf-8";
-      let html = await readFile(target, "utf8");
-      if (preview)
-        html = renderTemplate(
-          html,
-          templateValues(await getProject(design.project_id)),
-        );
-      return new Response(html, { headers });
+    // Open before stat/stream so retiring a replaced directory cannot interrupt a reader.
+    const fileHandle = await open(target, "r");
+    try {
+      const info = await fileHandle.stat();
+      headers["Content-Length"] = String(info.size);
+      return new Response(
+        Readable.toWeb(fileHandle.createReadStream()) as ReadableStream,
+        { headers },
+      );
+    } catch (error) {
+      await fileHandle.close();
+      throw error;
     }
-    const info = await stat(target);
-    headers["Content-Length"] = String(info.size);
-    return new Response(
-      Readable.toWeb(createReadStream(target)) as ReadableStream,
-      { headers },
-    );
+  };
+  return endpoint(async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await serve();
+      } catch (error) {
+        if (
+          attempt < 2 &&
+          ((error as NodeJS.ErrnoException).code === "ENOENT" ||
+            (error as Error).message === "Revision not found")
+        )
+          continue;
+        throw error;
+      }
+    }
   });
 }

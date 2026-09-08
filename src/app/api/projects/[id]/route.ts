@@ -4,25 +4,7 @@ import { endpoint, bodyJson, fail } from "@/lib/http";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getProject } from "@/lib/designs";
-import { agencies } from "@/lib/catalog";
-const url = z.union([
-  z.literal(""),
-  z
-    .url()
-    .max(2048)
-    .refine((s) => /^https?:\/\//i.test(s), "Use an HTTP or HTTPS URL"),
-]);
-const schema = projectIdentity.partial().extend({
-  units: z.string().max(30),
-  details: z.string().max(10000),
-  folderUrl: url,
-  client: z.object({
-    name: z.string().max(100),
-    mobile: z.string().max(24),
-    cea: z.string().regex(/^(|[Rr][0-9]{6}[A-Za-z])$/),
-    agency: z.string().refine((s) => agencies.some((a) => a.id === s)),
-  }),
-});
+const schema = projectIdentity.partial();
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -42,18 +24,8 @@ export async function PUT(
     const existing = await getProject(id);
     const p = { ...existing, ...schema.parse(await bodyJson(req)) };
     await db().execute(
-      "UPDATE projects SET name=?,site=?,developer=?,launch_window=?,units=?,details=?,folder_url=?,client=? WHERE id=? AND deleted_at IS NULL",
-      [
-        p.name,
-        p.site,
-        p.developer,
-        p.window,
-        p.units,
-        p.details,
-        p.folderUrl,
-        JSON.stringify(p.client),
-        id,
-      ],
+      "UPDATE projects SET name=?,site=?,developer=?,launch_window=? WHERE id=? AND deleted_at IS NULL",
+      [p.name, p.site, p.developer, p.window, id],
     );
     return Response.json(await getProject(id));
   });

@@ -10,7 +10,6 @@ import {
   replaceRevisionFile,
   MAX_BYTES,
 } from "../src/lib/storage";
-import { renderTemplate } from "../src/lib/templates";
 import { siteIdentity } from "../src/lib/hosts";
 let root: string;
 before(async () => {
@@ -57,21 +56,6 @@ test("rejects duplicate and missing entry point uploads", async () => {
   g.append("files", new File(["x"], "style.css"));
   await assert.rejects(storeUpload(g), /No HTML/);
 });
-test("metadata substitutions cannot inject markup or script", () => {
-  const output = renderTemplate(
-    '<p title="{{client_name}}">{{client_name}}</p><script>const x="{{client_name}}"</script><a href="{{mobile}}">Call</a>',
-    {
-      client_name: '<img src=x onerror=alert(1)>"',
-      mobile: "javascript:alert(1)",
-    },
-  );
-  assert.ok(output.includes("&lt;img"));
-  assert.ok(output.includes('<script>const x="{{client_name}}"</script>'));
-  assert.ok(!output.includes('href="javascript:'));
-  assert.ok(output.includes("&quot;"));
-  assert.ok(!output.includes("</p><img"));
-  assert.ok(output.includes(">&lt;img src=x onerror=alert(1)&gt;"));
-});
 test("site routing accepts only valid per-design hosts", () => {
   process.env.SITE_BASE_DOMAIN = "sites.example.com";
   const id = "8763621a-5b33-4732-9d32-0287d4ae955c";
@@ -102,7 +86,7 @@ test("extracts a complete ZIP while rejecting malicious archives", async () => {
   }
 });
 
-test("file replacement validates the combined size and preserves the original revision", async () => {
+test("file replacement validates the combined size and stages the replacement without modifying active files", async () => {
   const form = new FormData();
   form.append("files", new File(["<h1>Original</h1>"], "index.html"));
   form.append("files", new File(["old"], "style.css"));

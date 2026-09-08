@@ -21,8 +21,8 @@ export async function GET(req: Request) {
     if (!site) fail(403, "Unknown hostname");
     const found = site.revision
       ? await rows(
-          "SELECT r.design_id FROM revisions r JOIN designs d ON d.id=r.design_id JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE r.design_id=? AND r.revision=? AND d.deleted_at IS NULL",
-          [site.id, site.revision],
+          "SELECT r.design_id FROM revisions r JOIN designs d ON d.id=r.design_id JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE r.design_id=? AND (r.revision=? OR ?=1) AND d.deleted_at IS NULL",
+          [site.id, site.revision, site.revision],
         )
       : await rows(
           "SELECT d.id FROM designs d JOIN projects p ON p.id=d.project_id AND p.deleted_at IS NULL WHERE d.id=? AND d.deleted_at IS NULL",

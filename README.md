@@ -4,13 +4,13 @@ A native Next.js App Router conversion of the supplied Launch dashboard. React r
 
 ## Included
 
-- Sign-in with scrypt password hashes, database sessions, HTTP-only cookies, origin checks, and shared login attempt limits. All accounts share one agency workspace.
-- Eight starter projects and four agency records preserved from the supplied prototype. Add projects, edit their name/location/developer/launch status, move projects to Trash, and restore them with their designs/files. Trashing immediately disables live websites and existing previews; restored websites require publication again. Imported facts and dates are not independently verified.
-- Editable project information, folder links, and client/agency details; design search by project, status filters, linked designs, ZIP/folder/HTML uploads, file inventories, and entry-page selection.
+- Sign-in with scrypt password hashes, database sessions, HTTP-only cookies, origin checks, and shared login attempt limits. All accounts share one design workspace.
+- Eight starter projects preserved from the supplied prototype. Add projects, edit their name/location/developer/launch status, move projects to Trash, and restore them with their designs/files. Trashing immediately disables live websites and existing previews; restored websites require publication again. Imported facts and dates are not independently verified.
+- Editable project names, locations, developers and launch status; design search by project, status filters, linked designs, ZIP/folder/HTML uploads, file inventories, and entry-page selection.
 - Server validation of file paths, expanded upload size (50 MiB), file count (2,000), duplicates, unsupported/encrypted ZIPs, and symbolic links. No uploaded server-side code is executed.
-- Individual design deletion with confirmation and per-project Design Trash. Deletion disables the live website and all preview revisions; Restore keeps files and revisions, with explicit publishing required to go live again.
-- Per-file updates through the Files button: search existing paths and upload a replacement HTML, CSS, JavaScript, image, font or other asset. Each save creates a complete new revision, keeping every other file and the entry page intact; the live publication only changes when published again.
-- Immutable upload revisions; separate preview hostnames; public publication snapshots; unpublish. Editing files or client data never changes an existing publication until Publish is clicked again. Status labels do not take pages offline.
+- Individual design deletion with confirmation and per-project Design Trash. Deletion disables the live website and previews; Restore keeps current files, with explicit publishing required to go live again.
+- Per-file updates through the Files button: search existing paths and upload a replacement HTML, CSS, JavaScript, image, font or other asset. Saving replaces that file and immediately updates the same live URL, keeping every other file and the entry page intact.
+- One current file set per design, automatic publication for new uploads, and a stable website URL across file replacements. No revision or republishing workflow. Explicitly offline sites remain offline when edited; Preview offers Publish/Unpublish. Status labels only organise designs.
 - Docker Compose with Next.js, MySQL, Caddy automatic HTTPS, automatic schema migration, and persistent host directories. No S3 dependency.
 
 ## Local development
@@ -52,32 +52,26 @@ The admin hostname must differ from every uploaded-site hostname. Uploaded sites
 ```text
 MySQL
   users / sessions / login_limits
-  projects                     project and client fields
-  designs                      names, status, current/published revision pointers
-  revisions                    manifest, entry point, immutable directory reference
+  projects                     project identity fields
+  designs                      names, status, live file pointer, edit-conflict token
+  revisions                    current manifest and entry point (legacy table name)
 
 STORAGE_ROOT/
-  revisions/<random-uuid>/     original extracted files, never overwritten
-  published/<random-uuid>/     snapshot with saved template values applied
+  revisions/<random-uuid>/     current uploaded files (legacy directory name)
+  published/<random-uuid>/     legacy publications preserved until replaced
 ```
 
 Uploads use multipart binary data, not base64 blobs. MySQL stores manifests and metadata only. ZIPs are extracted into a new private directory; file paths must stay inside it. Hidden files, `.git`, `node_modules`, and macOS metadata are excluded. Keep only static website exports: PHP, Python, Node servers, build steps, and databases inside uploaded packages are not run.
 
-Template fields are supported in HTML text and ordinary quoted attributes. They are not substituted inside scripts, styles, event handlers, or `srcdoc`. Available names:
+HTML is served exactly as uploaded. Project details, client/agency fields, and template substitutions are no longer part of the app.
 
-```text
-{{project_name}} {{project_location}} {{developer}} {{total_units}}
-{{project_information}} {{client_name}} {{mobile}} {{cea}}
-{{agency_name}} {{agency_licence}} {{agency_address}}
-```
-
-The preview URL expires after 15 minutes and is exchanged for a cookie scoped to that preview hostname. Opening another preview refreshes access. Each revision has its own origin. Publications have a stable per-design hostname. Public HTML is delivered with a CSP sandbox; server-side code in packages cannot run. Avoid uploading service workers or templates that require top-level navigation permissions.
+Live previews use the same public website URL. Offline previews use a stable private hostname with a signed link that expires after 15 minutes and is exchanged for a scoped cookie. Existing signed preview links serve current files, not historical versions. Public HTML is delivered with a CSP sandbox; server-side code in packages cannot run. Avoid uploading service workers or websites that require top-level navigation permissions.
 
 Trash is recoverable and retains files on disk; there is no permanent deletion or automatic trash purge. Starter projects moved to Trash stay deleted across migrations and redeployments.
 
-Historical revisions remain on disk and in MySQL; the initial UI edits and publishes the latest revision. A failed transaction cleans up its new directory where possible. A process crash can leave an unreferenced directory; retain it until a database-aware maintenance/retention policy is introduced. Monitor disk usage because there is no automatic quota or history deletion.
+Updates stage complete files, then atomically replace the current database record and live pointer. A numeric edit-conflict token prevents stale or concurrent edits from overwriting a newer save; it is not shown as a revision. Replaced directories are removed after commit when no records reference them. New saves do not create history records. Legacy history and removed metadata columns are preserved for compatibility; the app does not expose or add to them. Failed transactions clean up their staged directory where possible. A process crash can leave an unreferenced directory, so monitor disk usage and use database-aware maintenance.
 
-Browser IndexedDB from the old HTML is not automatically imported. Re-upload original website files and re-enter saved details; the supplied HTML and its browser storage have not been modified. The old JSON backup format is not a server restore format.
+Browser IndexedDB from the old HTML is not automatically imported. Re-upload original website files ; the supplied HTML and its browser storage have not been modified. The old JSON backup format is not a server restore format.
 
 ## Deploy to EC2
 
@@ -100,23 +94,23 @@ Integration tests create a temporary account/project, exercise real API calls an
 
 All management endpoints require a workspace session. Mutations require `Origin: APP_ORIGIN`.
 
-| Endpoint | Purpose |
-| --- | --- |
-| `POST /api/auth/login` / `POST /api/auth/logout` | Workspace session |
-| `GET /api/projects` / `POST /api/projects` | List active projects and design counts / create a project |
-| `GET /api/projects?trash=1` | List deleted projects |
-| `GET /api/projects/:id` / `PUT /api/projects/:id` | Project identity, project details and client fields |
-| `DELETE /api/projects/:id` | Move project and designs to Trash; body includes the current project `name` |
-| `POST /api/projects/:id/restore` | Restore the project and designs, keeping websites unpublished |
-| `GET /api/library?project=:id` | Designs with current file inventories |
-| `POST /api/library` | Create/update metadata and upload files, ZIP, and entry point |
-| `POST /api/library/:id/files` | Replace one existing file using multipart `path`, `file`, and `expectedRevision`; creates a new revision |
-| `PATCH /api/library` | Change the organisational status |
-| `DELETE /api/library` | Move a design to Trash; body includes `id`, current `name`, and `expectedRevision` |
-| `GET /api/library?project=:id&trash=1` | List designs in this project’s Design Trash |
-| `POST /api/library/:id/restore` | Restore a design in an active project, keeping its website unpublished |
-| `POST /api/preview` | Create a signed URL for an existing revision |
-| `POST /api/publish` / `DELETE /api/publish` | Publish latest revision / unpublish |
-| `GET /api/health` | MySQL connectivity and writable storage readiness |
+| Endpoint                                          | Purpose                                                                                                                           |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/auth/login` / `POST /api/auth/logout`  | Workspace session                                                                                                                 |
+| `GET /api/projects` / `POST /api/projects`        | List active projects and design counts / create a project                                                                         |
+| `GET /api/projects?trash=1`                       | List deleted projects                                                                                                             |
+| `GET /api/projects/:id` / `PUT /api/projects/:id` | Project name, location, developer and launch status                                                                               |
+| `DELETE /api/projects/:id`                        | Move project and designs to Trash; body includes the current project `name`                                                       |
+| `POST /api/projects/:id/restore`                  | Restore the project and designs, keeping websites unpublished                                                                     |
+| `GET /api/library?project=:id`                    | Designs with current file inventories                                                                                             |
+| `POST /api/library`                               | Create/update metadata and upload files, ZIP, and entry point                                                                     |
+| `POST /api/library/:id/files`                     | Replace one existing file using multipart `path`, `file`, and `expectedRevision`; updates current files and the existing live URL |
+| `PATCH /api/library`                              | Change the organisational status                                                                                                  |
+| `DELETE /api/library`                             | Move a design to Trash; body includes `id`, current `name`, and `expectedRevision`                                                |
+| `GET /api/library?project=:id&trash=1`            | List designs in this project’s Design Trash                                                                                       |
+| `POST /api/library/:id/restore`                   | Restore a design in an active project, keeping its website unpublished                                                            |
+| `POST /api/preview`                               | Open the live URL or a signed offline preview                                                                                     |
+| `POST /api/publish` / `DELETE /api/publish`       | Make current files live / take website offline                                                                                    |
+| `GET /api/health`                                 | MySQL connectivity and writable storage readiness                                                                                 |
 
 Implementation follows the official [Next.js self-hosting guide](https://nextjs.org/docs/app/guides/self-hosting) and [Docker's Next.js guide](https://docs.docker.com/guides/nextjs/).

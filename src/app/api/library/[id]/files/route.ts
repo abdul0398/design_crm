@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { db, rows } from "@/lib/db";
 import { getRevision } from "@/lib/designs";
 import { replaceRevisionFile, discard, type StoredUpload } from "@/lib/storage";
+import { saveCurrentFiles, discardUnused } from "@/lib/current-files";
 export const runtime = "nodejs";
 export async function POST(
   req: Request,
@@ -36,6 +37,7 @@ export async function POST(
     const connection = await db().getConnection();
     let upload: StoredUpload | undefined;
     let committed = false;
+    let retired: string[] = [];
     try {
       await connection.beginTransaction();
       const [projects] = await connection.execute<RowDataPacket[]>(
@@ -44,7 +46,7 @@ export async function POST(
       );
       if (!projects.length) fail(404, "Project not found");
       const [designs] = await connection.execute<RowDataPacket[]>(
-        "SELECT revision FROM designs WHERE id=? AND deleted_at IS NULL FOR UPDATE",
+        "SELECT revision,published_at FROM designs WHERE id=? AND deleted_at IS NULL FOR UPDATE",
         [id],
       );
       if (!designs.length) fail(404, "Design not found");
@@ -53,33 +55,26 @@ export async function POST(
           409,
           "This design changed. Close this dialog and reopen Files before updating again.",
         );
-      const source = await getRevision(id, expectedRevision);
+      const source = await getRevision(id, expectedRevision, connection);
       upload = await replaceRevisionFile(source, path, file);
-      const revision = expectedRevision + 1;
-      await connection.execute(
-        "INSERT INTO revisions(design_id,revision,storage_path,entry_point,manifest,byte_size) VALUES(?,?,?,?,?,?)",
-        [
-          id,
-          revision,
-          upload.storagePath,
-          upload.entryPoint,
-          JSON.stringify(upload.entries),
-          upload.bytes,
-        ],
-      );
-      await connection.execute("UPDATE designs SET revision=? WHERE id=?", [
-        revision,
+      const saved = await saveCurrentFiles(
+        connection,
         id,
-      ]);
+        expectedRevision,
+        upload,
+        !!designs[0].published_at,
+      );
+      retired = saved.retired;
       await connection.commit();
       committed = true;
-      return Response.json({ id, revision });
+      return Response.json({ id, revision: saved.version });
     } catch (e) {
       await connection.rollback();
       throw e;
     } finally {
       connection.release();
       if (upload && !committed) await discard(upload.storagePath);
+      if (committed) await discardUnused(retired);
     }
   });
 }

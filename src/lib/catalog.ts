@@ -57,41 +57,8 @@ export const projects = [
     window: "Launched 25 Jul 2026",
   },
 ];
-export const agencies = [
-  {
-    id: "ERA",
-    name: "ERA Realty Network Pte Ltd",
-    licence: "L3002382K",
-    address: "ERA APAC Centre, 450 Lorong 6 Toa Payoh, Singapore 319394",
-  },
-  {
-    id: "PropNex",
-    name: "PropNex Realty Pte Ltd",
-    licence: "L3008022J",
-    address:
-      "480 Lorong 6 Toa Payoh, HDB Hub East Wing #10-01, Singapore 310480",
-  },
-  {
-    id: "Huttons",
-    name: "Huttons Asia Pte Ltd",
-    licence: "L3008899K",
-    address: "3 Bishan Place, #05-01 CPF Bishan Building, Singapore 579838",
-  },
-  {
-    id: "SRI",
-    name: "SRI Pte Ltd",
-    licence: "L3010738A",
-    address:
-      "1 Kim Seng Promenade, #17-10/12 Great World City West Tower, Singapore 237994",
-  },
-];
 export const emptyClient = { name: "", mobile: "", cea: "", agency: "ERA" };
-export type Client = typeof emptyClient;
 export type Project = (typeof projects)[number] & {
-  units: string;
-  details: string;
-  folderUrl: string;
-  client: Client;
   updated: string;
 };
 export type Entry = { path: string; size: number };

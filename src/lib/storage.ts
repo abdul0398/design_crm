@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, writeFile, readFile, rm, cp, copyFile } from "node:fs/promises";
+import { mkdir, writeFile, rm, copyFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import yauzl from "yauzl";
@@ -203,30 +203,7 @@ export async function storeUpload(
     );
   }
 }
-export async function snapshot(
-  source: string,
-  entries: Entry[],
-  render: (html: string) => string,
-) {
-  const target = `published/${randomUUID()}`;
-  try {
-    await cp(diskPath(source), diskPath(target), {
-      recursive: true,
-      errorOnExist: true,
-      force: false,
-    });
-    for (const entry of entries.filter((e) => /\.html?$/i.test(e.path))) {
-      const file = diskPath(`${target}/${entry.path}`);
-      await writeFile(file, render(await readFile(file, "utf8")));
-    }
-    return target;
-  } catch (e) {
-    await discard(target);
-    throw e;
-  }
-}
-
-// Copy an immutable revision, replacing exactly one existing path.
+// Stage a complete file set before switching the live pointer atomically.
 export async function replaceRevisionFile(
   source: Pick<StoredUpload, "storagePath" | "entries" | "entryPoint">,
   targetPath: string,

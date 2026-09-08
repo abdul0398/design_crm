@@ -15,18 +15,14 @@ import {
   ExternalLink,
   Pencil,
   Eye,
-  Users,
   LogOut,
   X,
   Upload,
-  Building2,
-  Save,
   Menu,
   Trash2,
   RotateCcw,
 } from "lucide-react";
 import {
-  agencies,
   projects as seedProjects,
   type Project,
   type Design,
@@ -160,8 +156,8 @@ function ProjectEditor({
     >
       <p className="dialog-subtitle">
         {project
-          ? "Update the project information shown in your library and website templates."
-          : "Create a workspace for your designs, website files and client details."}
+          ? "Update the project information shown in your library."
+          : "Create a workspace for your designs and website files."}
       </p>
       <form onSubmit={submit}>
         <fieldset disabled={busy}>
@@ -259,9 +255,10 @@ function DesignFiles({
   return (
     <Modal title={"Files — " + design.name} onClose={onClose} busy={busy}>
       <p className="dialog-subtitle">
-        Revision {design.revision} · Replace any file while keeping the rest of
-        the website. The saved file keeps its original path. Publish the new
-        revision when ready.
+        Replace any file while keeping its original path and the other files.
+        {design.published
+          ? " Saving updates the live website immediately at the same URL."
+          : " This website is offline. Replacing files keeps it offline."}
       </p>
       <input
         ref={input}
@@ -335,7 +332,7 @@ function DesignFiles({
               Cancel replacement
             </button>
             <button className="primary" disabled={busy}>
-              {busy ? "Saving…" : "Save file revision"}
+              {busy ? "Saving…" : "Replace file"}
             </button>
           </div>
         </form>
@@ -434,7 +431,12 @@ function UploadEditor({
       busy={busy}
     >
       <p className="dialog-subtitle">
-        {project.name} · Keep each website and its files together.
+        {project.name} ·{" "}
+        {design.revision
+          ? design.published
+            ? "Replacing files updates the live website immediately at the same URL."
+            : "This website is offline. Replacing files keeps it offline."
+          : "Uploaded websites go live automatically. You can take them offline from Preview."}
       </p>
       <form onSubmit={submit}>
         <fieldset disabled={busy}>
@@ -596,30 +598,7 @@ function UploadEditor({
               placeholder="https://www.canva.com/design/..."
             />
           </label>
-          <details className="template-help">
-            <summary>Connect HTML to saved project & client details</summary>
-            <p>
-              Use these fields in HTML text or quoted attributes. Save project
-              details before previewing or publishing.
-            </p>
-            <div>
-              {[
-                "project_name",
-                "project_location",
-                "developer",
-                "total_units",
-                "project_information",
-                "client_name",
-                "mobile",
-                "cea",
-                "agency_name",
-                "agency_licence",
-                "agency_address",
-              ].map((k) => (
-                <code key={k}>{"{{" + k + "}}"}</code>
-              ))}
-            </div>
-          </details>
+
           {error && (
             <p role="alert" className="form-error">
               {error}
@@ -629,7 +608,7 @@ function UploadEditor({
             {busy
               ? "Saving…"
               : selection
-                ? "Save website revision"
+                ? "Replace website files"
                 : "Save design"}
           </button>
         </fieldset>
@@ -641,7 +620,6 @@ export default function Desk({ loginName }: { loginName: string }) {
   const [nav, setNav] = useState<ProjectNav[]>([]),
     [selected, setSelected] = useState(""),
     [project, setProject] = useState<Project | null>(null),
-    [saved, setSaved] = useState(""),
     [designs, setDesigns] = useState<Design[]>([]),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("All"),
@@ -671,7 +649,6 @@ export default function Desk({ loginName }: { loginName: string }) {
     } | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  const dirty = !!project && JSON.stringify(project) !== saved;
   const refresh = useCallback(async () => {
     const id = selected;
     const items = await api("/api/projects");
@@ -680,7 +657,6 @@ export default function Desk({ loginName }: { loginName: string }) {
     if (!items.projects.some((p: ProjectNav) => p.id === id)) {
       setSelected(items.projects[0]?.id || "");
       setProject(null);
-      setSaved("");
       setDesigns([]);
       return false;
     }
@@ -697,7 +673,6 @@ export default function Desk({ loginName }: { loginName: string }) {
       const p = await api("/api/projects/" + id);
       if (selectedRef.current === id) {
         setProject(p);
-        setSaved(JSON.stringify(p));
       }
     } catch (e) {
       if (selectedRef.current === id) setError((e as Error).message);
@@ -714,14 +689,6 @@ export default function Desk({ loginName }: { loginName: string }) {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
   async function action(fn: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -737,7 +704,6 @@ export default function Desk({ loginName }: { loginName: string }) {
   function selectProject(id: string) {
     setSelected(id);
     setProject(null);
-    setSaved("");
     setDesigns([]);
     setFilter("All");
     setNotice("");
@@ -745,14 +711,7 @@ export default function Desk({ loginName }: { loginName: string }) {
   }
   function switchProject(id: string) {
     if (id === selected) return;
-    if (dirty) {
-      setConfirmation({
-        title: "Discard unsaved changes?",
-        message: "Your project and client changes have not been saved.",
-        label: "Discard changes",
-        run: async () => selectProject(id),
-      });
-    } else selectProject(id);
+    selectProject(id);
   }
   async function projectSaved(p: Project) {
     const items = await api("/api/projects");
@@ -761,7 +720,6 @@ export default function Desk({ loginName }: { loginName: string }) {
     setMenu(false);
     if (p.id === selected) {
       setProject(p);
-      setSaved(JSON.stringify(p));
     } else selectProject(p.id);
     setNotice("Project saved.");
   }
@@ -770,7 +728,7 @@ export default function Desk({ loginName }: { loginName: string }) {
     const target = project;
     setConfirmation({
       title: "Delete project?",
-      message: `Move “${target.name}” and its designs to Trash? Published websites will go offline. Files are kept so you can restore the project. Unsaved changes will be discarded.`,
+      message: `Move “${target.name}” and its designs to Trash? Published websites will go offline. Files are kept so you can restore the project.`,
       label: "Move to Trash",
       run: async () => {
         await api(
@@ -788,7 +746,7 @@ export default function Desk({ loginName }: { loginName: string }) {
   function deleteDesign(design: Design) {
     setConfirmation({
       title: "Delete design?",
-      message: `Move “${design.name}” to Design Trash? Its website and preview links will go offline. Uploaded files and revisions are kept so you can restore it.`,
+      message: `Move “${design.name}” to Design Trash? Its website and preview links will go offline. Uploaded files are kept so you can restore it.`,
       label: "Move to Design Trash",
       run: async () => {
         await api(
@@ -804,21 +762,9 @@ export default function Desk({ loginName }: { loginName: string }) {
       },
     });
   }
-  async function saveProject(e: FormEvent) {
-    e.preventDefault();
-    if (!project) return;
-    await action(async () => {
-      const p = await api("/api/projects/" + project.id, json("PUT", project));
-      setProject(p);
-      setSaved(JSON.stringify(p));
-      setNotice("Project and client details saved.");
-    });
-  }
   const visible = designs.filter(
-      (d) => filter === "All" || d.status === filter,
-    ),
-    agency =
-      agencies.find((a) => a.id === project?.client.agency) || agencies[0];
+    (d) => filter === "All" || d.status === filter,
+  );
   return (
     <div className="desk-shell">
       <aside className={"desk-sidebar " + (menu ? "is-open" : "")}>
@@ -837,8 +783,7 @@ export default function Desk({ loginName }: { loginName: string }) {
           <div className="project-library-actions">
             <button
               className="primary"
-              disabled={busy || dirty}
-              title={dirty ? "Save project changes first" : undefined}
+              disabled={busy}
               onClick={() => {
                 setProjectEditor({ project: null });
                 setMenu(false);
@@ -849,7 +794,7 @@ export default function Desk({ loginName }: { loginName: string }) {
             </button>
             <button
               className="secondary"
-              disabled={busy || dirty}
+              disabled={busy}
               onClick={() =>
                 void action(async () => {
                   const items = await api("/api/projects?trash=1");
@@ -897,7 +842,7 @@ export default function Desk({ loginName }: { loginName: string }) {
         <div className="nav-footer">
           <span className="workspace-avatar">LD</span>
           <div>
-            Agency workspace<small title={loginName}>{loginName}</small>
+            Design workspace<small title={loginName}>{loginName}</small>
           </div>
           <button
             className="icon-button"
@@ -907,15 +852,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                 await api("/api/auth/logout", { method: "POST" });
                 window.location.assign("/login");
               };
-              if (dirty)
-                setConfirmation({
-                  title: "Sign out?",
-                  message:
-                    "Your unsaved project and client changes will be discarded.",
-                  label: "Discard and sign out",
-                  run: logout,
-                });
-              else void action(logout);
+              void action(logout);
             }}
           >
             <LogOut size={17} />
@@ -938,7 +875,7 @@ export default function Desk({ loginName }: { loginName: string }) {
           </div>
           <span className="workspace-label">
             <span className="status-dot" />
-            Agency workspace
+            Design workspace
           </span>
         </header>
         <div className="page-content workflow-page">
@@ -994,8 +931,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                   <div className="project-heading-actions">
                     <button
                       className="secondary"
-                      disabled={busy || dirty}
-                      title={dirty ? "Save project changes first" : undefined}
+                      disabled={busy}
                       onClick={() => setProjectEditor({ project })}
                     >
                       <Pencil size={14} />
@@ -1022,24 +958,6 @@ export default function Desk({ loginName }: { loginName: string }) {
                     Last project updated<strong>{date(project.updated)}</strong>
                   </div>
                 </div>
-              </div>
-              <div className="folder-row">
-                <FolderOpen size={20} />
-                <strong>Project folder</strong>
-                <span className="folder-link">
-                  {project.folderUrl ||
-                    "Add a shared folder link in project details below."}
-                </span>
-                {project.folderUrl && (
-                  <a
-                    className="secondary"
-                    href={project.folderUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Open folder <ExternalLink size={14} />
-                  </a>
-                )}
               </div>
               <section className="design-section">
                 <div className="block-heading">
@@ -1112,7 +1030,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                       <tr>
                         <th>Design</th>
                         <th>Use status</th>
-                        <th>Website revision</th>
+                        <th>Website</th>
                         <th>Last updated</th>
                         <th className="align-right">Actions</th>
                       </tr>
@@ -1170,16 +1088,9 @@ export default function Desk({ loginName }: { loginName: string }) {
                           </td>
                           <td>
                             {d.revision ? (
-                              <div className="revision-label">
-                                <strong>Revision {d.revision}</strong>
-                                <small>
-                                  {d.publishedRevision === d.revision
-                                    ? "Published"
-                                    : d.publishedRevision
-                                      ? "New revision · Not published"
-                                      : "Ready to preview"}
-                                </small>
-                              </div>
+                              <span className="website-state">
+                                {d.published ? "Live" : "Offline"}
+                              </span>
                             ) : (
                               <span className="muted">Linked design</span>
                             )}
@@ -1201,12 +1112,8 @@ export default function Desk({ loginName }: { loginName: string }) {
                               {d.revision > 0 && (
                                 <button
                                   className="secondary compact"
-                                  disabled={busy || dirty}
-                                  title={
-                                    dirty
-                                      ? "Save changes before previewing"
-                                      : "Preview website"
-                                  }
+                                  disabled={busy}
+                                  title="Preview website"
                                   onClick={() =>
                                     void action(async () => {
                                       const result = await api(
@@ -1297,227 +1204,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                     website offline.
                   </span>
                 </div>
-                {dirty && (
-                  <p className="unsaved-hint">
-                    Save project and client changes before previewing or
-                    publishing.
-                  </p>
-                )}
               </section>
-              <form onSubmit={saveProject}>
-                <fieldset disabled={busy}>
-                  <section className="client-section">
-                    <div className="block-heading">
-                      <div className="heading-with-icon">
-                        <span className="section-icon">
-                          <Building2 size={19} />
-                        </span>
-                        <div>
-                          <h2>Project details</h2>
-                          <p>Details used by your website templates.</p>
-                        </div>
-                      </div>
-                      <span
-                        className={"save-indicator " + (dirty ? "unsaved" : "")}
-                      >
-                        {dirty ? "Unsaved changes" : "Saved details"}
-                      </span>
-                    </div>
-                    <div className="project-edit-grid">
-                      <label>
-                        Total units
-                        <input
-                          maxLength={30}
-                          value={project.units}
-                          onChange={(e) =>
-                            setProject({ ...project, units: e.target.value })
-                          }
-                          placeholder="Enter total units"
-                        />
-                      </label>
-                      <label>
-                        Shared folder link
-                        <input
-                          type="url"
-                          maxLength={2048}
-                          value={project.folderUrl}
-                          onChange={(e) =>
-                            setProject({
-                              ...project,
-                              folderUrl: e.target.value,
-                            })
-                          }
-                          placeholder="https://drive.google.com/..."
-                        />
-                      </label>
-                      <label className="full-width">
-                        Project information
-                        <textarea
-                          rows={3}
-                          maxLength={10000}
-                          value={project.details}
-                          onChange={(e) =>
-                            setProject({ ...project, details: e.target.value })
-                          }
-                          placeholder="Key facts, location and project notes"
-                        />
-                      </label>
-                    </div>
-                  </section>
-                  <section className="client-section">
-                    <div className="block-heading">
-                      <div className="heading-with-icon">
-                        <span className="section-icon">
-                          <Users size={19} />
-                        </span>
-                        <div>
-                          <h2>Client & agency</h2>
-                          <p>Saved contact details for {project.name}.</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="client-layout">
-                      <div className="client-fields">
-                        <div className="form-section-label">CLIENT DETAILS</div>
-                        <label>
-                          Client / agent name
-                          <input
-                            maxLength={100}
-                            value={project.client.name}
-                            onChange={(e) =>
-                              setProject({
-                                ...project,
-                                client: {
-                                  ...project.client,
-                                  name: e.target.value,
-                                },
-                              })
-                            }
-                            placeholder="Enter full name"
-                          />
-                        </label>
-                        <div className="field-row">
-                          <label>
-                            Mobile number
-                            <input
-                              type="tel"
-                              maxLength={24}
-                              value={project.client.mobile}
-                              onChange={(e) =>
-                                setProject({
-                                  ...project,
-                                  client: {
-                                    ...project.client,
-                                    mobile: e.target.value,
-                                  },
-                                })
-                              }
-                              placeholder="+65 9123 4567"
-                            />
-                          </label>
-                          <label>
-                            CEA registration
-                            <input
-                              maxLength={8}
-                              pattern="[Rr][0-9]{6}[A-Za-z]"
-                              value={project.client.cea}
-                              onChange={(e) =>
-                                setProject({
-                                  ...project,
-                                  client: {
-                                    ...project.client,
-                                    cea: e.target.value.toUpperCase(),
-                                  },
-                                })
-                              }
-                              placeholder="R012345A"
-                            />
-                          </label>
-                        </div>
-                        <label>
-                          Agency
-                          <select
-                            value={project.client.agency}
-                            onChange={(e) =>
-                              setProject({
-                                ...project,
-                                client: {
-                                  ...project.client,
-                                  agency: e.target.value,
-                                },
-                              })
-                            }
-                          >
-                            {agencies.map((a) => (
-                              <option key={a.id}>{a.id}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <div className="agency-line">
-                          <Building2 size={16} />
-                          <div>
-                            <strong>{agency.name}</strong>
-                            <span>{agency.licence}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="preview-column">
-                        <div className="form-section-label">
-                          CONTACT PREVIEW <span>Updates as you type</span>
-                        </div>
-                        <div className="client-preview-card">
-                          <div className="preview-card-top">
-                            <span className="client-avatar">
-                              {project.client.name
-                                .trim()
-                                .split(/\s+/)
-                                .slice(0, 2)
-                                .map((s) => s[0])
-                                .join("")
-                                .toUpperCase() || <Users size={22} />}
-                            </span>
-                            <span className="agency-wordmark">{agency.id}</span>
-                          </div>
-                          <h3>{project.client.name || "Client name"}</h3>
-                          <div className="preview-contact">
-                            {project.client.mobile || "Mobile number"}
-                            <span className="cea-pill">
-                              {project.client.cea || "CEA registration"}
-                            </span>
-                          </div>
-                          <div className="preview-agency">
-                            <strong>
-                              {agency.name} ({agency.licence})
-                            </strong>
-                            <p>{agency.address}</p>
-                          </div>
-                        </div>
-                        <p className="preview-caption">
-                          Saved details are filled into website previews and
-                          publication snapshots.
-                        </p>
-                      </div>
-                    </div>
-                    <div className="panel-actions">
-                      <span>
-                        Agency licence and address are filled automatically.
-                      </span>
-                      <button
-                        type="submit"
-                        className="primary"
-                        disabled={!dirty || busy}
-                      >
-                        <Save size={15} />
-                        {busy ? "Saving…" : "Save project & client details"}
-                      </button>
-                    </div>
-                  </section>
-                </fieldset>
-              </form>
-              <footer className="workspace-footnote">
-                Project and agency information imported from your supplied
-                design.
-              </footer>
               {editor && (
                 <UploadEditor
                   design={editor}
@@ -1531,11 +1218,7 @@ export default function Desk({ loginName }: { loginName: string }) {
               )}
               {preview && (
                 <Modal
-                  title={
-                    preview.design.name +
-                    " · Revision " +
-                    preview.design.revision
-                  }
+                  title={preview.design.name}
                   onClose={() => setPreview(null)}
                   wide
                   busy={busy}
@@ -1556,9 +1239,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                     >
                       Open preview <ExternalLink size={14} />
                     </a>
-                    <span>
-                      Publishing uses the saved project and client details.
-                    </span>
+                    <span>File replacements update the same website URL.</span>
                     {preview.design.published && (
                       <button
                         className="secondary"
@@ -1567,7 +1248,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                           setConfirmation({
                             title: "Unpublish website?",
                             message:
-                              "This website will go offline. Its files and revisions will remain available.",
+                              "This website will go offline. Its files will remain available.",
                             label: "Unpublish",
                             run: async () => {
                               await api(
@@ -1584,32 +1265,30 @@ export default function Desk({ loginName }: { loginName: string }) {
                         Unpublish
                       </button>
                     )}
-                    <button
-                      className="primary"
-                      disabled={busy}
-                      onClick={() =>
-                        void action(async () => {
-                          await api(
-                            "/api/publish",
-                            json("POST", {
-                              id: preview.design.id,
-                              revision: preview.design.revision,
-                            }),
-                          );
-                          await refresh();
-                          setPreview(null);
-                          setNotice(
-                            "Website published. Open it using the link in its design row.",
-                          );
-                        })
-                      }
-                    >
-                      {busy
-                        ? "Publishing…"
-                        : preview.design.published
-                          ? "Publish this revision"
-                          : "Publish website"}
-                    </button>
+                    {!preview.design.published && (
+                      <button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() =>
+                          void action(async () => {
+                            await api(
+                              "/api/publish",
+                              json("POST", {
+                                id: preview.design.id,
+                                revision: preview.design.revision,
+                              }),
+                            );
+                            await refresh();
+                            setPreview(null);
+                            setNotice(
+                              "Website published. Open it using the link in its design row.",
+                            );
+                          })
+                        }
+                      >
+                        {busy ? "Publishing…" : "Publish website"}
+                      </button>
+                    )}
                   </div>
                   {error && (
                     <p className="form-error" role="alert">
@@ -1682,9 +1361,7 @@ export default function Desk({ loginName }: { loginName: string }) {
           onClose={() => setFileEditor(null)}
           onSaved={async () => {
             await refresh();
-            setNotice(
-              "File updated in a new revision. Preview and publish it when ready.",
-            );
+            setNotice("File replaced. The website keeps the same URL.");
           }}
         />
       )}
@@ -1696,8 +1373,7 @@ export default function Desk({ loginName }: { loginName: string }) {
         >
           <p className="dialog-subtitle">
             {designTrash.project.name} · Restore designs with their uploaded
-            files and revisions. Websites stay offline until you publish them
-            again.
+            files. Websites stay offline until you publish them again.
           </p>
           {!designTrash.designs.length ? (
             <p>No deleted designs in this project.</p>
@@ -1709,7 +1385,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                     <strong>{d.name}</strong>
                     <small>
                       {d.format} ·{" "}
-                      {d.revision ? `Revision ${d.revision}` : "Linked design"}
+                      {d.revision ? "Website files" : "Linked design"}
                     </small>
                   </div>
                   <button
