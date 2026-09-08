@@ -121,3 +121,27 @@ docker compose -f compose.yaml -f compose.shared-caddy.yaml up -d --build
 Merge `deploy/Caddyfile.edge-snippet` into the existing gateway's Caddyfile, preserving its other host blocks and merging any global settings. Back up and validate the full config, then reload Caddy; do not stop existing apps. The new gateway's private port 8081 supplies the certificate-authorization token from its environment. The shared Caddyfile therefore contains no Design CRM secret.
 
 For this topology, use the same two Compose files for updates, admin creation and backups. The backup script accepts `COMPOSE_FILE=compose.yaml:compose.shared-caddy.yaml`. Back up the shared gateway's existing certificate volume as part of the host's normal backups.
+
+### Reloading this host's shared Caddy safely
+
+The existing container can retain an older inode for its single-file Caddyfile bind mount. After editing the host file, copy the reviewed file into the container and validate/reload that explicit copy, rather than assuming the mounted file changed:
+
+```bash
+docker cp /home/ubuntu/jome-content-os/Caddyfile jome-content-os-caddy-1:/tmp/reviewed.Caddyfile
+docker exec jome-content-os-caddy-1 caddy validate --config /tmp/reviewed.Caddyfile --adapter caddyfile
+docker exec jome-content-os-caddy-1 caddy reload --config /tmp/reviewed.Caddyfile --adapter caddyfile
+```
+
+The host Caddyfile remains the persistent source for container recreation; the running configuration is also saved to Caddy's persistent config volume. Preserve the Design CRM routes when deploying the other applications.
+
+A public HTTPS integration check (including certificate issuance for temporary test sites) can be run after DNS is ready:
+
+```bash
+docker compose -f compose.yaml -f compose.shared-caddy.yaml run --rm --no-deps \
+  -v /opt/design-crm/tests:/app/tests:ro \
+  -v /srv/design-crm-data/websites:/data/websites \
+  -e TEST_ENDPOINT=https://design-crm.datapoco.ai -e TEST_PUBLIC_SITES=1 \
+  migrate npm run test:integration
+```
+
+The test creates and removes only its own account, project, designs and files.

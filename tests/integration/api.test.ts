@@ -69,10 +69,15 @@ const send = (path: string, method = "GET", body?: unknown) =>
   });
 async function siteFetch(url: string, siteCookie = "") {
   const u = new URL(url);
-  return transport(endpoint + u.pathname + u.search, {
-    headers: { host: u.host, cookie: siteCookie },
-    redirect: "manual",
-  });
+  return transport(
+    (process.env.TEST_PUBLIC_SITES ? u.origin : endpoint) +
+      u.pathname +
+      u.search,
+    {
+      headers: { host: u.host, cookie: siteCookie },
+      redirect: "manual",
+    },
+  );
 }
 after(async () => {
   try {
