@@ -216,6 +216,138 @@ function ProjectEditor({
     </Modal>
   );
 }
+function DesignFiles({
+  design,
+  onClose,
+  onSaved,
+}: {
+  design: Design;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [search, setSearch] = useState("");
+  const [target, setTarget] = useState("");
+  const [replacement, setReplacement] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const files = design.entries.filter((e) =>
+    e.path.toLowerCase().includes(search.toLowerCase()),
+  );
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!replacement || !target) return;
+    setBusy(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.set("expectedRevision", String(design.revision));
+      form.set("path", target);
+      form.set("file", replacement);
+      await api("/api/library/" + design.id + "/files", {
+        method: "POST",
+        body: form,
+      });
+      await onSaved();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title={"Files — " + design.name} onClose={onClose} busy={busy}>
+      <p className="dialog-subtitle">
+        Revision {design.revision} · Replace any file while keeping the rest of
+        the website. The saved file keeps its original path. Publish the new
+        revision when ready.
+      </p>
+      <input
+        ref={input}
+        type="file"
+        hidden
+        aria-label="Choose replacement file"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            setError("");
+            if (file.size > 50 * 1024 * 1024)
+              setError("Choose a file up to 50 MB.");
+            else setReplacement(file);
+          }
+          e.target.value = "";
+        }}
+      />
+      <label>
+        Find a file
+        <input
+          placeholder="Search by file name or folder"
+          value={search}
+          disabled={busy}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </label>
+      <ul className="design-file-list">
+        {files.map((file) => (
+          <li key={file.path}>
+            <div>
+              <strong>{file.path}</strong>
+              <small>
+                {size(file.size)}
+                {file.path === design.entryPoint ? " · Starting page" : ""}
+              </small>
+            </div>
+            <button
+              className="secondary"
+              disabled={busy}
+              aria-label={"Replace " + file.path}
+              onClick={() => {
+                setTarget(file.path);
+                setReplacement(null);
+                setError("");
+                input.current?.click();
+              }}
+            >
+              Replace
+            </button>
+          </li>
+        ))}
+      </ul>
+      {!files.length && <p>No matching files.</p>}
+      {replacement && (
+        <form onSubmit={save}>
+          <p className="replacement-summary">
+            <strong>{replacement.name}</strong> ({size(replacement.size)}) will
+            replace <strong>{target}</strong>.
+          </p>
+          <div className="confirmation-actions">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => {
+                setReplacement(null);
+                setTarget("");
+                setError("");
+              }}
+            >
+              Cancel replacement
+            </button>
+            <button className="primary" disabled={busy}>
+              {busy ? "Saving…" : "Save file revision"}
+            </button>
+          </div>
+        </form>
+      )}
+      {error && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+    </Modal>
+  );
+}
 function UploadEditor({
   design,
   project,
@@ -518,6 +650,7 @@ export default function Desk({ loginName }: { loginName: string }) {
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [editor, setEditor] = useState<Partial<Design> | null>(null),
+    [fileEditor, setFileEditor] = useState<Design | null>(null),
     [preview, setPreview] = useState<{ design: Design; url: string } | null>(
       null,
     ),
@@ -1057,6 +1190,17 @@ export default function Desk({ loginName }: { loginName: string }) {
                               {d.revision > 0 && (
                                 <button
                                   className="secondary compact"
+                                  disabled={busy}
+                                  aria-label={"Files for " + d.name}
+                                  onClick={() => setFileEditor(d)}
+                                >
+                                  <FolderOpen size={14} />
+                                  Files
+                                </button>
+                              )}
+                              {d.revision > 0 && (
+                                <button
+                                  className="secondary compact"
                                   disabled={busy || dirty}
                                   title={
                                     dirty
@@ -1531,6 +1675,18 @@ export default function Desk({ loginName }: { loginName: string }) {
             </p>
           )}
         </Modal>
+      )}
+      {fileEditor && (
+        <DesignFiles
+          design={fileEditor}
+          onClose={() => setFileEditor(null)}
+          onSaved={async () => {
+            await refresh();
+            setNotice(
+              "File updated in a new revision. Preview and publish it when ready.",
+            );
+          }}
+        />
       )}
       {designTrash && (
         <Modal

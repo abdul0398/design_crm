@@ -103,8 +103,19 @@ after(async () => {
       if (d?.published_path) storedPaths.add(d.published_path);
       await db().execute("DELETE FROM designs WHERE id=?", [designId]);
     }
-    for (const id of extraDesigns)
+    for (const id of extraDesigns) {
+      const revisions = await rows<{ storage_path: string }>(
+        "SELECT storage_path FROM revisions WHERE design_id=?",
+        [id],
+      );
+      revisions.forEach((r) => storedPaths.add(r.storage_path));
+      const [published] = await rows<{ published_path: string }>(
+        "SELECT published_path FROM designs WHERE id=?",
+        [id],
+      );
+      if (published?.published_path) storedPaths.add(published.published_path);
       await db().execute("DELETE FROM designs WHERE id=?", [id]);
+    }
     await db().execute("DELETE FROM projects WHERE id=?", [projectId]);
     for (const id of extraProjects)
       await db().execute("DELETE FROM projects WHERE id=?", [id]);
@@ -258,6 +269,227 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
     assert.equal(restored.status, 200);
     assert.equal((await restored.json()).site, "Changed location");
   });
+  await t.test(
+    "individual file updates preserve other files, prior revisions and publication",
+    async () => {
+      const createdProject = await send("/api/projects", "POST", {
+        name: "File update QC project",
+        site: "QC",
+        developer: "QC",
+        window: "Testing",
+      });
+      assert.equal(createdProject.status, 201);
+      const fileProject = (await createdProject.json()).id;
+      extraProjects.add(fileProject);
+      const form = new FormData();
+      Object.entries({
+        project: fileProject,
+        name: "File update test",
+        format: "Website",
+        status: "Unused",
+        url: "",
+        expectedRevision: "0",
+        entryPoint: "site/index.html",
+      }).forEach(([k, v]) => form.set(k, v));
+      const html = "<h1>Original page</h1>";
+      const bytes = new Uint8Array([0, 255, 127, 1]);
+      form.append("files", new File([html], "index.html"));
+      form.append("files", new File(["old-css"], "style.css"));
+      form.append("files", new File([bytes], "image.png"));
+      form.set(
+        "paths",
+        JSON.stringify([
+          "site/index.html",
+          "site/assets/style.css",
+          "site/assets/image.png",
+        ]),
+      );
+      const created = await transport(endpoint + "/api/library", {
+        method: "POST",
+        headers: headers(),
+        body: form,
+      });
+      assert.equal(created.status, 201);
+      const id = (await created.json()).id;
+      extraDesigns.add(id);
+      async function update(
+        path: string,
+        revision: number,
+        file?: File,
+        customHeaders = headers(),
+      ) {
+        const body = new FormData();
+        body.set("path", path);
+        body.set("expectedRevision", String(revision));
+        if (file) body.set("file", file);
+        return transport(endpoint + "/api/library/" + id + "/files", {
+          method: "POST",
+          headers: customHeaders,
+          body,
+        });
+      }
+      assert.equal(
+        (
+          await update("site/index.html", 1, new File([html], "x"), {
+            ...headers(),
+            cookie: "",
+          })
+        ).status,
+        401,
+      );
+      assert.equal(
+        (
+          await update("site/index.html", 1, new File([html], "x"), {
+            ...headers(),
+            origin: "https://attacker.invalid",
+          })
+        ).status,
+        403,
+      );
+      const published = await send("/api/publish", "POST", { id, revision: 1 });
+      assert.equal(published.status, 200);
+      const url = (await published.json()).url;
+      const originalPublicHtml = await (
+        await siteFetch(url + "/site/index.html")
+      ).text();
+      const [before] = await rows<{ storage_path: string }>(
+        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=1",
+        [id],
+      );
+      const changed = await update(
+        "site/assets/style.css",
+        1,
+        new File(["new-css"], "renamed.css"),
+      );
+      assert.equal(changed.status, 200, await changed.clone().text());
+      assert.equal((await changed.json()).revision, 2);
+      assert.equal(
+        (await update("site/assets/style.css", 1, new File(["stale"], "x")))
+          .status,
+        409,
+      );
+      assert.equal(
+        (await update("../outside.css", 2, new File(["x"], "x"))).status,
+        400,
+      );
+      assert.equal(
+        (await update("missing.css", 2, new File(["x"], "x"))).status,
+        400,
+      );
+      assert.equal((await update("site/index.html", 2)).status, 400);
+      const [next] = await rows<{
+        storage_path: string;
+        entry_point: string;
+        byte_size: number;
+      }>(
+        "SELECT storage_path,entry_point,byte_size FROM revisions WHERE design_id=? AND revision=2",
+        [id],
+      );
+      assert.equal(next.entry_point, "site/index.html");
+      assert.equal(
+        Number(next.byte_size),
+        Buffer.byteLength(html) + 7 + bytes.length,
+      );
+      assert.equal(
+        await readFile(
+          diskPath(next.storage_path + "/site/assets/style.css"),
+          "utf8",
+        ),
+        "new-css",
+      );
+      assert.equal(
+        await readFile(
+          diskPath(before.storage_path + "/site/assets/style.css"),
+          "utf8",
+        ),
+        "old-css",
+      );
+      assert.equal(
+        await readFile(
+          diskPath(next.storage_path + "/site/index.html"),
+          "utf8",
+        ),
+        html,
+      );
+      assert.deepEqual(
+        await readFile(diskPath(next.storage_path + "/site/assets/image.png")),
+        Buffer.from(bytes),
+      );
+      assert.equal(
+        await (await siteFetch(url + "/site/assets/style.css")).text(),
+        "old-css",
+      );
+      const changedHtml = await update(
+        "site/index.html",
+        2,
+        new File(["<h1>Updated page</h1>"], "replacement.html"),
+      );
+      assert.equal(changedHtml.status, 200);
+      assert.equal((await changedHtml.json()).revision, 3);
+      const changedBinary = await update(
+        "site/assets/image.png",
+        3,
+        new File([new Uint8Array([5, 0, 6, 255])], "replacement.png"),
+      );
+      assert.equal(changedBinary.status, 200);
+      assert.equal(
+        await (await siteFetch(url + "/site/index.html")).text(),
+        originalPublicHtml,
+      );
+      const [last] = await rows<{ storage_path: string }>(
+        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=4",
+        [id],
+      );
+      assert.deepEqual(
+        await readFile(diskPath(last.storage_path + "/site/assets/image.png")),
+        Buffer.from([5, 0, 6, 255]),
+      );
+      assert.equal(
+        await readFile(
+          diskPath(last.storage_path + "/site/assets/style.css"),
+          "utf8",
+        ),
+        "new-css",
+      );
+      const [oldPublication] = await rows<{ published_path: string }>(
+        "SELECT published_path FROM designs WHERE id=?",
+        [id],
+      );
+      storedPaths.add(oldPublication.published_path);
+      assert.equal(
+        (await send("/api/publish", "POST", { id, revision: 4 })).status,
+        200,
+      );
+      assert.match(
+        await (await siteFetch(url + "/site/index.html")).text(),
+        /<h1>Updated page<\/h1>/,
+      );
+      const [newPublication] = await rows<{ published_path: string }>(
+        "SELECT published_path FROM designs WHERE id=?",
+        [id],
+      );
+      storedPaths.add(newPublication.published_path);
+      assert.equal(
+        (
+          await send("/api/library", "DELETE", {
+            id,
+            name: "File update test",
+            expectedRevision: 4,
+          })
+        ).status,
+        200,
+      );
+      const [paths] = await rows<{ storage_path: string }>(
+        "SELECT storage_path FROM revisions WHERE design_id=? AND revision=4",
+        [id],
+      );
+      assert.ok(paths.storage_path);
+      assert.equal(
+        (await update("site/index.html", 4, new File(["blocked"], "x"))).status,
+        404,
+      );
+    },
+  );
   let previewUrl = "",
     previewCookie = "",
     liveUrl = "";

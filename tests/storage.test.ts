@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { safePath, storeUpload, diskPath } from "../src/lib/storage";
+import {
+  safePath,
+  storeUpload,
+  diskPath,
+  replaceRevisionFile,
+  MAX_BYTES,
+} from "../src/lib/storage";
 import { renderTemplate } from "../src/lib/templates";
 import { siteIdentity } from "../src/lib/hosts";
 let root: string;
@@ -94,4 +100,44 @@ test("extracts a complete ZIP while rejecting malicious archives", async () => {
       assert.ok(result!.entries.some((e) => /\.css$/.test(e.path)));
     } else await assert.rejects(storeUpload(f));
   }
+});
+
+test("file replacement validates the combined size and preserves the original revision", async () => {
+  const form = new FormData();
+  form.append("files", new File(["<h1>Original</h1>"], "index.html"));
+  form.append("files", new File(["old"], "style.css"));
+  const original = (await storeUpload(form))!;
+  const updated = await replaceRevisionFile(
+    original,
+    "style.css",
+    new File(["new-css"], "different-name.css"),
+  );
+  assert.equal(
+    await readFile(diskPath(original.storagePath + "/style.css"), "utf8"),
+    "old",
+  );
+  assert.equal(
+    await readFile(diskPath(updated.storagePath + "/style.css"), "utf8"),
+    "new-css",
+  );
+  assert.equal(
+    await readFile(diskPath(updated.storagePath + "/index.html"), "utf8"),
+    "<h1>Original</h1>",
+  );
+  assert.equal(updated.entryPoint, "index.html");
+  for (const path of ["../outside.css", "missing.css", "/style.css"])
+    await assert.rejects(
+      replaceRevisionFile(original, path, new File(["x"], "a")),
+    );
+  const full = {
+    ...original,
+    entries: [
+      { path: "index.html", size: MAX_BYTES - 3 },
+      { path: "style.css", size: 3 },
+    ],
+  };
+  await assert.rejects(
+    replaceRevisionFile(full, "style.css", new File(["four"], "a")),
+    /50 MB/,
+  );
 });

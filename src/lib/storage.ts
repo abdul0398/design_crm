@@ -1,5 +1,6 @@
 import path from "node:path";
-import { mkdir, writeFile, readFile, rm, cp } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm, cp, copyFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import yauzl from "yauzl";
 import { fail } from "./http";
@@ -221,6 +222,47 @@ export async function snapshot(
     return target;
   } catch (e) {
     await discard(target);
+    throw e;
+  }
+}
+
+// Copy an immutable revision, replacing exactly one existing path.
+export async function replaceRevisionFile(
+  source: Pick<StoredUpload, "storagePath" | "entries" | "entryPoint">,
+  targetPath: string,
+  file: File,
+): Promise<StoredUpload> {
+  safePath(targetPath);
+  if (!source.entries.some((e) => e.path === targetPath))
+    fail(400, "Choose an existing file in this design");
+  if (file.size > MAX_BYTES) fail(413, "File exceeds 50 MB");
+  const entries = source.entries.map((e) => ({
+    ...e,
+    size: e.path === targetPath ? file.size : e.size,
+  }));
+  const bytes = entries.reduce((sum, e) => sum + e.size, 0);
+  if (bytes > MAX_BYTES || entries.length > MAX_FILES)
+    fail(413, "Updated website exceeds 2,000 files or 50 MB");
+  const storagePath = `revisions/${randomUUID()}`;
+  try {
+    for (const entry of entries) {
+      safePath(entry.path);
+      const destination = diskPath(`${storagePath}/${entry.path}`);
+      await mkdir(path.dirname(destination), { recursive: true });
+      if (entry.path === targetPath)
+        await writeFile(destination, Buffer.from(await file.arrayBuffer()), {
+          flag: "wx",
+        });
+      else
+        await copyFile(
+          diskPath(`${source.storagePath}/${entry.path}`),
+          destination,
+          constants.COPYFILE_EXCL,
+        );
+    }
+    return { storagePath, entries, entryPoint: source.entryPoint, bytes };
+  } catch (e) {
+    await discard(storagePath);
     throw e;
   }
 }
