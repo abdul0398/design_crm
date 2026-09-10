@@ -51,7 +51,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { db, rows } from "../../src/lib/db";
 import { hashPassword } from "../../src/lib/auth";
-import { discard, diskPath } from "../../src/lib/storage";
+import { discard, diskPath, storeUpload } from "../../src/lib/storage";
 const origin = process.env.APP_ORIGIN!;
 const endpoint =
   process.env.TEST_ENDPOINT ||
@@ -500,6 +500,32 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         new URL(previewAfter).origin,
         "Private preview hostname stays the same",
       );
+      const download = await send(`/api/library/${id}/download`);
+      assert.equal(
+        download.status,
+        200,
+        "Offline designs can still be downloaded",
+      );
+      const downloaded = new FormData();
+      downloaded.set(
+        "zip",
+        new File([await download.arrayBuffer()], "website.zip"),
+      );
+      const extracted = (await storeUpload(downloaded))!;
+      storedPaths.add(extracted.storagePath);
+      assert.equal(
+        await readFile(
+          diskPath(extracted.storagePath + "/site/index.html"),
+          "utf8",
+        ),
+        "<h1>Offline update</h1>",
+      );
+      assert.deepEqual(
+        await readFile(
+          diskPath(extracted.storagePath + "/site/assets/image.png"),
+        ),
+        Buffer.from([5, 0, 6, 255]),
+      );
       assert.equal(
         (
           await send("/api/library", "DELETE", {
@@ -515,6 +541,7 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         [id],
       );
       assert.ok(paths.storage_path);
+      assert.equal((await send(`/api/library/${id}/download`)).status, 404);
       assert.equal(
         (await update("site/index.html", 6, new File(["blocked"], "x"))).status,
         404,
@@ -580,6 +607,53 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
     ).json();
     assert.equal(library.designs[0].entries.length, 3);
   });
+  await t.test(
+    "website ZIP download requires login and preserves all folder paths and bytes",
+    async () => {
+      assert.equal(
+        (
+          await transport(endpoint + "/api/library/" + designId + "/download", {
+            headers: { host: new URL(origin).host },
+          })
+        ).status,
+        401,
+      );
+      assert.equal(
+        (await send("/api/library/" + randomUUID() + "/download")).status,
+        404,
+      );
+      const response = await send("/api/library/" + designId + "/download");
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "application/zip");
+      assert.equal(
+        response.headers.get("content-disposition"),
+        'attachment; filename="Test-website.zip"',
+      );
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      const bytes = await response.arrayBuffer();
+      assert.equal(
+        Number(response.headers.get("content-length")),
+        bytes.byteLength,
+      );
+      const form = new FormData();
+      form.set("zip", new File([bytes], "download.zip"));
+      const extracted = (await storeUpload(form))!;
+      storedPaths.add(extracted.storagePath);
+      const [current] = await rows<{ storage_path: string }>(
+        "SELECT storage_path FROM revisions WHERE design_id=?",
+        [designId],
+      );
+      assert.deepEqual(
+        extracted.entries.map((e) => e.path),
+        ["site/assets/app.js", "site/assets/style.css", "site/index.html"],
+      );
+      for (const entry of extracted.entries)
+        assert.deepEqual(
+          await readFile(diskPath(extracted.storagePath + "/" + entry.path)),
+          await readFile(diskPath(current.storage_path + "/" + entry.path)),
+        );
+    },
+  );
   await t.test(
     "private preview serves HTML and nested assets on its own host",
     async () => {
@@ -747,6 +821,10 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
           .status,
         200,
       );
+      assert.equal(
+        (await send(`/api/library/${designId}/download`)).status,
+        404,
+      );
       assert.equal((await siteFetch(liveUrl + "/site/index.html")).status, 404);
       assert.equal(
         (
@@ -831,6 +909,10 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       assert.equal(siblingResponse.status, 201);
       const sibling = (await siblingResponse.json()).id;
       extraDesigns.add(sibling);
+      assert.equal(
+        (await send(`/api/library/${sibling}/download`)).status,
+        400,
+      );
       const deletion = {
         id: designId,
         name: "Test website",

@@ -9,6 +9,7 @@ A native Next.js App Router conversion of the supplied Launch dashboard. React r
 - Editable project names, locations, developers and launch status; design search by project, status filters, linked designs, ZIP/folder/HTML uploads, file inventories, and entry-page selection.
 - Server validation of file paths, expanded upload size (50 MiB), file count (2,000), duplicates, unsupported/encrypted ZIPs, and symbolic links. No uploaded server-side code is executed.
 - Individual design deletion with confirmation and per-project Design Trash. Deletion disables the live website and previews; Restore keeps current files, with explicit publishing required to go live again.
+- Download ZIP for any uploaded website, including offline designs. Exports the current files with their original names and folders; requires sign-in. Linked-only designs have no ZIP.
 - Per-file updates through the Files button: search existing paths and upload a replacement HTML, CSS, JavaScript, image, font or other asset. Saving replaces that file and immediately updates the same live URL, keeping every other file and the entry page intact.
 - One current file set per design, automatic publication for new uploads, and a stable website URL across file replacements. No revision or republishing workflow. Explicitly offline sites remain offline when edited; Preview offers Publish/Unpublish. Status labels only organise designs.
 - Docker Compose with Next.js, MySQL, Caddy automatic HTTPS, automatic schema migration, and persistent host directories. No S3 dependency.
@@ -105,6 +106,7 @@ All management endpoints require a workspace session. Mutations require `Origin:
 | `GET /api/library?project=:id`                    | Designs with current file inventories                                                                                             |
 | `POST /api/library`                               | Create/update metadata and upload files, ZIP, and entry point                                                                     |
 | `POST /api/library/:id/files`                     | Replace one existing file using multipart `path`, `file`, and `expectedRevision`; updates current files and the existing live URL |
+| `GET /api/library/:id/download`                   | Download all current website files as a ZIP attachment                                                                            |
 | `PATCH /api/library`                              | Change the organisational status                                                                                                  |
 | `DELETE /api/library`                             | Move a design to Trash; body includes `id`, current `name`, and `expectedRevision`                                                |
 | `GET /api/library?project=:id&trash=1`            | List designs in this project’s Design Trash                                                                                       |
