@@ -702,30 +702,6 @@ export default function Desk({ loginName }: { loginName: string }) {
       setBusy(false);
     }
   }
-  async function downloadWebsite(design: Design) {
-    const response = await fetch(`/api/library/${design.id}/download`);
-    if (response.status === 401) {
-      window.location.assign("/login");
-      throw Error("Please sign in");
-    }
-    if (!response.ok) {
-      const result = await response.json();
-      throw Error(result.error || "Unable to download website");
-    }
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement("a");
-    link.href = url;
-    link.download =
-      (design.name
-        .replace(/[^a-zA-Z0-9._-]+/g, "-")
-        .replace(/^[.-]+|[.-]+$/g, "")
-        .slice(0, 100) || "website") + ".zip";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    setNotice("Website ZIP downloaded with all current files and folders.");
-  }
   function selectProject(id: string) {
     setSelected(id);
     setProject(null);
@@ -1160,16 +1136,14 @@ export default function Desk({ loginName }: { loginName: string }) {
                                 </button>
                               )}
                               {d.revision > 0 && (
-                                <button
+                                <a
                                   className="secondary compact"
-                                  disabled={busy}
+                                  href={`/api/library/${d.id}/download`}
+                                  download
                                   aria-label={"Download ZIP for " + d.name}
-                                  onClick={() =>
-                                    void action(() => downloadWebsite(d))
-                                  }
                                 >
                                   <Download size={14} /> Download ZIP
-                                </button>
+                                </a>
                               )}
                               {(d.liveUrl || d.url) && (
                                 <a
