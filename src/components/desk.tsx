@@ -14,7 +14,6 @@ import {
   FileCode2,
   ExternalLink,
   Pencil,
-  Eye,
   LogOut,
   X,
   Upload,
@@ -214,10 +213,12 @@ function ProjectEditor({
   );
 }
 function DesignFiles({
+  onBack,
   design,
   onClose,
   onSaved,
 }: {
+  onBack: () => void;
   design: Design;
   onClose: () => void;
   onSaved: () => Promise<void>;
@@ -254,7 +255,19 @@ function DesignFiles({
     }
   }
   return (
-    <Modal title={"Files — " + design.name} onClose={onClose} busy={busy}>
+    <Modal
+      title={"Replace one file — " + design.name}
+      onClose={onClose}
+      busy={busy}
+    >
+      <button
+        type="button"
+        className="text-button"
+        disabled={busy}
+        onClick={onBack}
+      >
+        Back to Update website
+      </button>
       <p className="dialog-subtitle">
         Replace any file while keeping its original path and the other files.
         {design.published
@@ -357,6 +370,8 @@ function UploadEditor({
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const [replaceOne, setReplaceOne] = useState(false);
+  const [confirmOffline, setConfirmOffline] = useState(false);
   const [draft, setDraft] = useState({
     name: design.name || "",
     format: design.format || "Landing page",
@@ -424,10 +439,39 @@ function UploadEditor({
       setBusy(false);
     }
   }
+  async function changeAvailability() {
+    setBusy(true);
+    setError("");
+    try {
+      await api(
+        "/api/publish",
+        json(design.published ? "DELETE" : "POST", {
+          id: design.id,
+          revision: design.revision,
+        }),
+      );
+      await onSaved();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (replaceOne && design.id && design.revision) {
+    return (
+      <DesignFiles
+        design={design as Design}
+        onClose={onClose}
+        onBack={() => setReplaceOne(false)}
+        onSaved={onSaved}
+      />
+    );
+  }
   const entries = selection?.entries || design.entries || [];
   return (
     <Modal
-      title={design.id ? "Update design" : "Add a design"}
+      title={design.id ? "Update website — " + design.name : "Add a design"}
       onClose={onClose}
       busy={busy}
     >
@@ -437,52 +481,13 @@ function UploadEditor({
           ? design.published
             ? "Replacing files updates the live website immediately at the same URL."
             : "This website is offline. Replacing files keeps it offline."
-          : "Uploaded websites go live automatically. You can take them offline from Preview."}
+          : "Uploaded websites go live automatically."}
       </p>
       <form onSubmit={submit}>
         <fieldset disabled={busy}>
-          <label>
-            Design name
-            <input
-              required
-              maxLength={100}
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder="e.g. Project launch — Design 01"
-            />
-          </label>
-          <div className="field-row">
-            <label>
-              Format
-              <select
-                value={draft.format}
-                onChange={(e) => setDraft({ ...draft, format: e.target.value })}
-              >
-                {formats.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Use status
-              <select
-                value={draft.status}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    status: e.target.value as Design["status"],
-                  })
-                }
-              >
-                {statuses.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </label>
-          </div>
           <div className="website-upload">
             <strong>
-              {design.id ? "Replace website files" : "Website files"}
+              {design.id ? "Upload your updated website" : "Website files"}
             </strong>
             <input
               ref={zip}
@@ -518,38 +523,45 @@ function UploadEditor({
                 e.target.value = "";
               }}
             />
-            <div className="package-upload-actions">
+            <div className="simple-upload-actions">
               <button
-                className="package-upload-choice"
+                className="package-upload-choice zip-upload-choice"
                 type="button"
                 onClick={() => zip.current?.click()}
               >
                 <Upload size={21} />
-                <strong>Upload ZIP</strong>
+                <strong>
+                  {design.id ? "Upload updated ZIP" : "Upload ZIP"}
+                </strong>
                 <span>A complete website archive</span>
-              </button>
-              <button
-                className="package-upload-choice"
-                type="button"
-                onClick={() => folder.current?.click()}
-              >
-                <FolderOpen size={21} />
-                <strong>Upload folder</strong>
-                <span>Include files and subfolders</span>
               </button>
             </div>
             <p className="field-help">
-              Up to 50 MB expanded and 2,000 files. HTML, CSS, JavaScript,
-              images, and fonts.
+              {design.id
+                ? "Include every file you want to keep. The ZIP replaces the entire website. "
+                : ""}
+              Up to 50 MB and 2,000 files.
             </p>
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => html.current?.click()}
-            >
-              Or choose a standalone HTML file
-            </button>
-            {entries.length > 0 && (
+            <details className="other-upload-options">
+              <summary>Upload a folder or HTML instead</summary>
+              <div className="confirmation-actions">
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => folder.current?.click()}
+                >
+                  Upload folder
+                </button>
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => html.current?.click()}
+                >
+                  Upload HTML
+                </button>
+              </div>
+            </details>
+            {selection && entries.length > 0 && (
               <div className="package-summary">
                 <strong>
                   {selection?.name || "Saved website"} · {entries.length} files
@@ -588,17 +600,74 @@ function UploadEditor({
               </div>
             )}
           </div>
-          <label>
-            Design source link{" "}
-            <span className="optional">Optional with website files</span>
-            <input
-              type="url"
-              maxLength={2048}
-              value={draft.url}
-              onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-              placeholder="https://www.canva.com/design/..."
-            />
-          </label>
+          {!!design.revision && (
+            <button
+              type="button"
+              className="secondary single-file-update"
+              disabled={!!selection}
+              onClick={() => setReplaceOne(true)}
+            >
+              Replace just one file
+            </button>
+          )}
+          <details
+            className="website-settings"
+            open={design.id ? undefined : true}
+          >
+            <summary>Design name and details</summary>
+            <label>
+              Design name
+              <input
+                required
+                maxLength={100}
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder="e.g. Project launch — Design 01"
+              />
+            </label>
+            <div className="field-row">
+              <label>
+                Format
+                <select
+                  value={draft.format}
+                  onChange={(e) =>
+                    setDraft({ ...draft, format: e.target.value })
+                  }
+                >
+                  {formats.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Use status
+                <select
+                  value={draft.status}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      status: e.target.value as Design["status"],
+                    })
+                  }
+                >
+                  {statuses.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label>
+              Design source link{" "}
+              <span className="optional">Optional with website files</span>
+              <input
+                type="url"
+                maxLength={2048}
+                value={draft.url}
+                onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                placeholder="https://www.canva.com/design/..."
+              />
+            </label>
+          </details>
 
           {error && (
             <p role="alert" className="form-error">
@@ -609,11 +678,73 @@ function UploadEditor({
             {busy
               ? "Saving…"
               : selection
-                ? "Replace website files"
-                : "Save design"}
+                ? design.id
+                  ? "Update website"
+                  : "Upload website"
+                : "Save changes"}
           </button>
         </fieldset>
       </form>
+      {!!design.revision && (
+        <details
+          className="website-settings"
+          open={design.published ? undefined : true}
+        >
+          <summary>
+            Website availability · {design.published ? "Live" : "Offline"}
+          </summary>
+          <p className="field-help">
+            {design.published
+              ? "Your website is live. Taking it offline keeps its files saved."
+              : "Your website is offline. Make it live to let visitors open it."}
+          </p>
+          {selection && (
+            <p className="field-help">
+              Save your file changes before changing availability.
+            </p>
+          )}
+          {confirmOffline ? (
+            <div>
+              <p className="field-help">
+                Take this website offline? Visitors will no longer be able to
+                open it.
+              </p>
+              <div className="confirmation-actions">
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => setConfirmOffline(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="secondary danger"
+                  disabled={busy || !!selection}
+                  onClick={() => void changeAvailability()}
+                >
+                  {busy ? "Saving…" : "Yes, take offline"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="secondary"
+              disabled={busy || !!selection}
+              onClick={() =>
+                design.published
+                  ? setConfirmOffline(true)
+                  : void changeAvailability()
+              }
+            >
+              {busy
+                ? "Saving…"
+                : design.published
+                  ? "Take website offline"
+                  : "Make website live"}
+            </button>
+          )}
+        </details>
+      )}
     </Modal>
   );
 }
@@ -629,10 +760,6 @@ export default function Desk({ loginName }: { loginName: string }) {
     [busy, setBusy] = useState(false),
     [loading, setLoading] = useState(true),
     [editor, setEditor] = useState<Partial<Design> | null>(null),
-    [fileEditor, setFileEditor] = useState<Design | null>(null),
-    [preview, setPreview] = useState<{ design: Design; url: string } | null>(
-      null,
-    ),
     [menu, setMenu] = useState(false),
     [projectEditor, setProjectEditor] = useState<{
       project: Project | null;
@@ -747,7 +874,7 @@ export default function Desk({ loginName }: { loginName: string }) {
   function deleteDesign(design: Design) {
     setConfirmation({
       title: "Delete design?",
-      message: `Move “${design.name}” to Design Trash? Its website and preview links will go offline. Uploaded files are kept so you can restore it.`,
+      message: `Move “${design.name}” to Design Trash? Its website will go offline. Uploaded files are kept so you can restore it.`,
       label: "Move to Design Trash",
       run: async () => {
         await api(
@@ -1045,13 +1172,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                                 <FileCode2 size={20} />
                               </span>
                               <div>
-                                <button
-                                  className="design-title"
-                                  disabled={busy}
-                                  onClick={() => setEditor(d)}
-                                >
-                                  {d.name}
-                                </button>
+                                <span className="design-title">{d.name}</span>
                                 <small>
                                   {d.format}
                                   {d.entryPoint
@@ -1099,42 +1220,36 @@ export default function Desk({ loginName }: { loginName: string }) {
                           <td className="updated">{date(d.updated)}</td>
                           <td>
                             <div className="row-actions">
-                              {d.revision > 0 && (
-                                <button
-                                  className="secondary compact"
-                                  disabled={busy}
-                                  aria-label={"Files for " + d.name}
-                                  onClick={() => setFileEditor(d)}
-                                >
-                                  <FolderOpen size={14} />
-                                  Files
-                                </button>
-                              )}
-                              {d.revision > 0 && (
-                                <button
-                                  className="secondary compact"
-                                  disabled={busy}
-                                  title="Preview website"
-                                  onClick={() =>
-                                    void action(async () => {
-                                      const result = await api(
-                                        "/api/preview",
-                                        json("POST", {
-                                          id: d.id,
-                                          revision: d.revision,
-                                        }),
-                                      );
-                                      setPreview({
-                                        design: d,
-                                        url: result.url,
-                                      });
-                                    })
+                              {(d.revision ? d.liveUrl : d.url) ? (
+                                <a
+                                  className="primary compact"
+                                  href={
+                                    (d.revision ? d.liveUrl : d.url) ||
+                                    undefined
                                   }
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label={"Open website for " + d.name}
                                 >
-                                  <Eye size={14} />
-                                  Preview
+                                  <ExternalLink size={14} /> Open website
+                                </a>
+                              ) : (
+                                <button
+                                  className="secondary compact"
+                                  disabled
+                                  title="Make this website live from Update website"
+                                >
+                                  <ExternalLink size={14} /> Open website
                                 </button>
                               )}
+                              <button
+                                className="secondary compact"
+                                disabled={busy}
+                                aria-label={"Update website for " + d.name}
+                                onClick={() => setEditor(d)}
+                              >
+                                <Upload size={14} /> Update website
+                              </button>
                               {d.revision > 0 && (
                                 <a
                                   className="secondary compact"
@@ -1145,25 +1260,6 @@ export default function Desk({ loginName }: { loginName: string }) {
                                   <Download size={14} /> Download ZIP
                                 </a>
                               )}
-                              {(d.liveUrl || d.url) && (
-                                <a
-                                  className="icon-button"
-                                  href={d.liveUrl || d.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  aria-label={"Open " + d.name}
-                                >
-                                  <ExternalLink size={16} />
-                                </a>
-                              )}
-                              <button
-                                className="icon-button"
-                                disabled={busy}
-                                aria-label={"Edit " + d.name}
-                                onClick={() => setEditor(d)}
-                              >
-                                <Pencil size={16} />
-                              </button>
                               <button
                                 className="secondary compact danger"
                                 disabled={busy}
@@ -1211,8 +1307,7 @@ export default function Desk({ loginName }: { loginName: string }) {
                     {visible.length} of {designs.length} designs
                   </span>
                   <span>
-                    Status labels organise designs. Use Unpublish to take a
-                    website offline.
+                    Update website replaces your files at the same URL.
                   </span>
                 </div>
               </section>
@@ -1226,87 +1321,6 @@ export default function Desk({ loginName }: { loginName: string }) {
                     setNotice("Design saved.");
                   }}
                 />
-              )}
-              {preview && (
-                <Modal
-                  title={preview.design.name}
-                  onClose={() => setPreview(null)}
-                  wide
-                  busy={busy}
-                >
-                  <iframe
-                    title={"Preview " + preview.design.name}
-                    src={preview.url}
-                    className="website-preview"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="preview-actions">
-                    <a
-                      className="secondary"
-                      href={preview.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Open preview <ExternalLink size={14} />
-                    </a>
-                    <span>File replacements update the same website URL.</span>
-                    {preview.design.published && (
-                      <button
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => {
-                          setConfirmation({
-                            title: "Unpublish website?",
-                            message:
-                              "This website will go offline. Its files will remain available.",
-                            label: "Unpublish",
-                            run: async () => {
-                              await api(
-                                "/api/publish",
-                                json("DELETE", { id: preview.design.id }),
-                              );
-                              await refresh();
-                              setPreview(null);
-                              setNotice("Website unpublished.");
-                            },
-                          });
-                        }}
-                      >
-                        Unpublish
-                      </button>
-                    )}
-                    {!preview.design.published && (
-                      <button
-                        className="primary"
-                        disabled={busy}
-                        onClick={() =>
-                          void action(async () => {
-                            await api(
-                              "/api/publish",
-                              json("POST", {
-                                id: preview.design.id,
-                                revision: preview.design.revision,
-                              }),
-                            );
-                            await refresh();
-                            setPreview(null);
-                            setNotice(
-                              "Website published. Open it using the link in its design row.",
-                            );
-                          })
-                        }
-                      >
-                        {busy ? "Publishing…" : "Publish website"}
-                      </button>
-                    )}
-                  </div>
-                  {error && (
-                    <p className="form-error" role="alert">
-                      {error}
-                    </p>
-                  )}
-                </Modal>
               )}
             </>
           )}
@@ -1323,7 +1337,7 @@ export default function Desk({ loginName }: { loginName: string }) {
         <Modal title="Project Trash" onClose={() => setTrash(null)} busy={busy}>
           <p className="dialog-subtitle">
             Restore projects with their designs and files. Websites stay offline
-            until you publish them again.
+            until you choose Update website → Make website live.
           </p>
           {!trash.length ? (
             <p>Trash is empty.</p>
@@ -1366,16 +1380,6 @@ export default function Desk({ loginName }: { loginName: string }) {
           )}
         </Modal>
       )}
-      {fileEditor && (
-        <DesignFiles
-          design={fileEditor}
-          onClose={() => setFileEditor(null)}
-          onSaved={async () => {
-            await refresh();
-            setNotice("File replaced. The website keeps the same URL.");
-          }}
-        />
-      )}
       {designTrash && (
         <Modal
           title="Design Trash"
@@ -1384,7 +1388,8 @@ export default function Desk({ loginName }: { loginName: string }) {
         >
           <p className="dialog-subtitle">
             {designTrash.project.name} · Restore designs with their uploaded
-            files. Websites stay offline until you publish them again.
+            files. Websites stay offline until you choose Update website → Make
+            website live.
           </p>
           {!designTrash.designs.length ? (
             <p>No deleted designs in this project.</p>
