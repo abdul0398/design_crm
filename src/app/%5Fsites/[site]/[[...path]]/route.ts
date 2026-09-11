@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { open } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -85,6 +86,7 @@ export async function GET(
             status: 308,
             headers: {
               Location: `/${file.split("/").map(encodeURIComponent).join("/")}/`,
+              "Cache-Control": "no-store",
             },
           });
         file = index;
@@ -106,7 +108,9 @@ export async function GET(
     );
     const headers: Record<string, string> = {
       "Content-Type": lookup(file) || "application/octet-stream",
-      "Cache-Control": "no-store",
+      "Cache-Control": preview
+        ? "private, no-store"
+        : "public, no-cache, must-revalidate",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Security-Policy":
@@ -119,7 +123,40 @@ export async function GET(
     const fileHandle = await open(target, "r");
     try {
       const info = await fileHandle.stat();
+      if (!preview) {
+        // Storage directories are immutable: every replacement gets a new path.
+        // Weak validators remain valid when Caddy compresses the same content.
+        const version = createHash("sha256")
+          .update(
+            JSON.stringify([
+              revision.storagePath,
+              file,
+              info.size,
+              info.mtimeMs,
+            ]),
+          )
+          .digest("hex");
+        const etag = `W/"${version}"`;
+        headers.ETag = etag;
+        const condition = req.headers.get("if-none-match");
+        if (
+          condition?.split(",").some((value) => {
+            const candidate = value.trim();
+            return (
+              candidate === "*" ||
+              candidate.replace(/^W\//, "") === etag.slice(2)
+            );
+          })
+        ) {
+          await fileHandle.close();
+          return new Response(null, { status: 304, headers });
+        }
+      }
       headers["Content-Length"] = String(info.size);
+      if (req.method === "HEAD") {
+        await fileHandle.close();
+        return new Response(null, { headers });
+      }
       return new Response(
         Readable.toWeb(fileHandle.createReadStream()) as ReadableStream,
         { headers },
@@ -129,7 +166,7 @@ export async function GET(
       throw error;
     }
   };
-  return endpoint(async () => {
+  const response = await endpoint(async () => {
     for (let attempt = 0; ; attempt++) {
       try {
         return await serve();
@@ -144,4 +181,8 @@ export async function GET(
       }
     }
   });
+  if (response.status >= 400) response.headers.set("Cache-Control", "no-store");
+  return response;
 }
+
+export const HEAD = GET;

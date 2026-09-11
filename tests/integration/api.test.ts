@@ -32,10 +32,16 @@ async function transport(
           for (let i = 0; i < response.rawHeaders.length; i += 2)
             headers.append(response.rawHeaders[i], response.rawHeaders[i + 1]);
           resolve(
-            new Response(Buffer.concat(chunks), {
-              status: response.statusCode,
-              headers,
-            }),
+            new Response(
+              request.method === "HEAD" ||
+                [204, 304].includes(response.statusCode!)
+                ? null
+                : Buffer.concat(chunks),
+              {
+                status: response.statusCode,
+                headers,
+              },
+            ),
           );
         });
       },
@@ -76,14 +82,20 @@ const send = (path: string, method = "GET", body?: unknown) =>
     body: body ? JSON.stringify(body) : undefined,
     redirect: "manual",
   });
-async function siteFetch(url: string, siteCookie = "") {
+async function siteFetch(
+  url: string,
+  siteCookie = "",
+  requestHeaders: Record<string, string> = {},
+  method = "GET",
+) {
   const u = new URL(url);
   return transport(
     (process.env.TEST_PUBLIC_SITES ? u.origin : endpoint) +
       u.pathname +
       u.search,
     {
-      headers: { host: u.host, cookie: siteCookie },
+      method,
+      headers: { ...requestHeaders, host: u.host, cookie: siteCookie },
       redirect: "manual",
     },
   );
@@ -362,6 +374,9 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         "SELECT storage_path FROM revisions WHERE design_id=? AND revision=1",
         [id],
       );
+      const oldCssETag = (
+        await siteFetch(url + "/site/assets/style.css")
+      ).headers.get("etag")!;
       const changed = await update(
         "site/assets/style.css",
         1,
@@ -369,6 +384,12 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       );
       assert.equal(changed.status, 200, await changed.clone().text());
       assert.equal((await changed.json()).revision, 2);
+      const freshCss = await siteFetch(url + "/site/assets/style.css", "", {
+        "if-none-match": oldCssETag,
+      });
+      assert.equal(freshCss.status, 200);
+      assert.notEqual(freshCss.headers.get("etag"), oldCssETag);
+      assert.equal(await freshCss.text(), "new-css");
       assert.equal(
         (await update("site/assets/style.css", 1, new File(["stale"], "x")))
           .status,
@@ -749,8 +770,60 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
     },
   );
   await t.test(
+    "published files revalidate from browser cache; private previews never cache",
+    async () => {
+      for (const path of ["/site/index.html", "/site/assets/style.css"]) {
+        const first = await siteFetch(liveUrl + path);
+        assert.equal(first.status, 200);
+        assert.equal(
+          first.headers.get("cache-control"),
+          "public, no-cache, must-revalidate",
+        );
+        const etag = first.headers.get("etag")!;
+        assert.match(etag, /^W\/"[a-f0-9]{64}"$/);
+        const cached = await siteFetch(liveUrl + path, "", {
+          "if-none-match": etag,
+        });
+        assert.equal(cached.status, 304);
+        assert.equal(await cached.text(), "");
+        assert.equal(cached.headers.get("etag"), etag);
+        const list = await siteFetch(liveUrl + path, "", {
+          "if-none-match": '"old", ' + etag.slice(2),
+        });
+        assert.equal(list.status, 304);
+        const head = await siteFetch(liveUrl + path, "", {}, "HEAD");
+        assert.equal(head.status, 200);
+        assert.equal(head.headers.get("etag"), etag);
+        assert.equal(await head.text(), "");
+        const stale = await siteFetch(liveUrl + path, "", {
+          "if-none-match": 'W/"stale"',
+        });
+        assert.equal(stale.status, 200);
+      }
+      const privatePage = await siteFetch(
+        new URL(previewUrl).origin + "/site/index.html",
+        previewCookie,
+        { "if-none-match": "*" },
+      );
+      assert.equal(privatePage.status, 200);
+      assert.equal(
+        privatePage.headers.get("cache-control"),
+        "private, no-store",
+      );
+      assert.equal(privatePage.headers.get("etag"), null);
+      const missing = await siteFetch(liveUrl + "/missing.png", "", {
+        "if-none-match": "*",
+      });
+      assert.equal(missing.status, 404);
+      assert.equal(missing.headers.get("cache-control"), "no-store");
+    },
+  );
+  await t.test(
     "whole website replacement updates the same URL and rejects stale edits",
     async () => {
+      const previousETag = (
+        await siteFetch(liveUrl + "/site/index.html")
+      ).headers.get("etag")!;
       const form = new FormData();
       for (const [k, v] of Object.entries({
         id: designId,
@@ -779,6 +852,12 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
       });
       assert.equal(replacement.status, 200, await replacement.clone().text());
       assert.equal((await replacement.json()).revision, 2);
+      const refreshed = await siteFetch(liveUrl + "/site/index.html", "", {
+        "if-none-match": previousETag,
+      });
+      assert.equal(refreshed.status, 200);
+      assert.notEqual(refreshed.headers.get("etag"), previousETag);
+      assert.match(await refreshed.text(), /Whole website replaced/);
       assert.equal(
         (await send("/api/publish", "POST", { id: designId, revision: 1 }))
           .status,
@@ -1102,7 +1181,14 @@ test("real MySQL / filesystem / HTTP lifecycle", async (t) => {
         (await send("/api/publish", "DELETE", { id: designId })).status,
         200,
       );
-      assert.equal((await siteFetch(liveUrl + "/site/index.html")).status, 404);
+      assert.equal(
+        (
+          await siteFetch(liveUrl + "/site/index.html", "", {
+            "if-none-match": "*",
+          })
+        ).status,
+        404,
+      );
       assert.equal((await send("/api/auth/logout", "POST")).status, 200);
       assert.equal((await send("/api/projects")).status, 401);
     },

@@ -64,6 +64,9 @@ STORAGE_ROOT/
 
 Uploads use multipart binary data, not base64 blobs. MySQL stores manifests and metadata only. ZIPs are extracted into a new private directory; file paths must stay inside it. Hidden files, `.git`, `node_modules`, and macOS metadata are excluded. Keep only static website exports: PHP, Python, Node servers, build steps, and databases inside uploaded packages are not run.
 
+Published website files use ETag revalidation (`public, no-cache, must-revalidate`): browsers keep bytes and reuse them after a 304 response, while every request still checks current publication and file version. ZIP and single-file replacements invalidate validators immediately. Private previews, redirects, and errors are not cached. Caddy compresses eligible HTML, CSS, JavaScript, SVG, and other text responses with Zstandard or gzip, including through the shared gateway. Uploaded files and ZIP exports remain byte-for-byte unchanged. First visits still download images; large embedded images require smaller source assets for further improvement.
+
+
 HTML is served exactly as uploaded. Project details, client/agency fields, and template substitutions are no longer part of the app.
 
 Live previews use the same public website URL. Offline previews use a stable private hostname with a signed link that expires after 15 minutes and is exchanged for a scoped cookie. Existing signed preview links serve current files, not historical versions. Public HTML is delivered with a CSP sandbox; server-side code in packages cannot run. Avoid uploading service workers or websites that require top-level navigation permissions.

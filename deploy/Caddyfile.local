@@ -5,6 +5,7 @@
 	request_body {
 		max_size 55MB
 	}
+	encode zstd gzip
 	reverse_proxy app:3000 {
 		header_up Host {http.request.hostport}
 	}
