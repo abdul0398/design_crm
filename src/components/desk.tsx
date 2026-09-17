@@ -7,10 +7,8 @@ import {
   type FormEvent,
 } from "react";
 import {
-  Layers3,
   Search,
   Plus,
-  FolderOpen,
   FileCode2,
   ExternalLink,
   Pencil,
@@ -622,7 +620,7 @@ function UploadEditor({
                 maxLength={100}
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="e.g. Project launch — Design 01"
+                placeholder={project.name + " — Design 01"}
               />
             </label>
             <div className="field-row">
@@ -896,14 +894,21 @@ export default function Desk({ loginName }: { loginName: string }) {
   return (
     <div className="desk-shell">
       <aside className={"desk-sidebar " + (menu ? "is-open" : "")}>
-        <div className="brand">
+        <a
+          className="brand"
+          href="https://jomejourney.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Jome Journey — open jomejourney.com"
+        >
           <span className="brandmark">
-            <Layers3 size={20} />
+            <img src="/jome-journey-mark.png" alt="" width={26} height={26} />
           </span>
-          <div>
-            Launch<span className="brand-secondary">Design desk</span>
-          </div>
-        </div>
+          <span>
+            <span className="brand-title">Jome Journey</span>
+            <span className="brand-secondary">Design desk</span>
+          </span>
+        </a>
         <div className="nav-content">
           <div className="nav-label">
             PROJECT LIBRARY <span>{nav.length}</span>
@@ -968,7 +973,9 @@ export default function Desk({ loginName }: { loginName: string }) {
           </nav>
         </div>
         <div className="nav-footer">
-          <span className="workspace-avatar">LD</span>
+          <span className="workspace-avatar">
+            <img src="/jome-journey-mark.png" alt="" width={22} height={22} />
+          </span>
           <div>
             Design workspace<small title={loginName}>{loginName}</small>
           </div>
@@ -1048,11 +1055,27 @@ export default function Desk({ loginName }: { loginName: string }) {
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">PROJECT WORKSPACE</div>
-                  <h1>{project.name}</h1>
-                  <p>
-                    {project.site}
+                  <h1>
+                    {project.name}
+                    <span
+                      className={
+                        "launch-pill " +
+                        (/^launched\b/i.test(project.window) ? "launched" : "")
+                      }
+                    >
+                      {project.window}
+                    </span>
+                  </h1>
+                  <p className="project-meta">
+                    <span>
+                      <span className="meta-label">Address</span>
+                      {project.site || "To be confirmed"}
+                    </span>
                     <span className="separator">·</span>
-                    {project.developer}
+                    <span>
+                      <span className="meta-label">Developer</span>
+                      {project.developer || "To be confirmed"}
+                    </span>
                   </p>
                 </div>
                 <div className="project-heading-meta">
@@ -1074,31 +1097,19 @@ export default function Desk({ loginName }: { loginName: string }) {
                       Delete project
                     </button>
                   </div>
-                  <span
-                    className={
-                      "launch-pill " +
-                      (/^launched\b/i.test(project.window) ? "launched" : "")
-                    }
-                  >
-                    {project.window}
-                  </span>
                   <div className="last-project-updated">
-                    Last project updated<strong>{date(project.updated)}</strong>
+                    <span>Last project information updated</span>
+                    <strong>{date(project.updated)}</strong>
                   </div>
                 </div>
               </div>
               <section className="design-section">
                 <div className="block-heading">
-                  <div className="heading-with-icon">
-                    <span className="section-icon">
-                      <Layers3 size={19} />
-                    </span>
-                    <div>
-                      <h2>
-                        Design library <span>{designs.length}</span>
-                      </h2>
-                      <p>Keep each website design and its files together.</p>
-                    </div>
+                  <div>
+                    <h2>
+                      {project.name} <span>{designs.length}</span>
+                    </h2>
+                    <p>All websites and design &amp; files are below.</p>
                   </div>
                   <div className="design-library-actions">
                     <button
@@ -1158,7 +1169,6 @@ export default function Desk({ loginName }: { loginName: string }) {
                       <tr>
                         <th>Design</th>
                         <th>Use status</th>
-                        <th>Website</th>
                         <th>Last updated</th>
                         <th className="align-right">Actions</th>
                       </tr>
@@ -1172,12 +1182,24 @@ export default function Desk({ loginName }: { loginName: string }) {
                                 <FileCode2 size={20} />
                               </span>
                               <div>
-                                <span className="design-title">{d.name}</span>
+                                <span className="design-title">
+                                  {d.name}
+                                  {d.revision ? (
+                                    <span
+                                      className={
+                                        "website-state " +
+                                        (d.published ? "is-live" : "is-offline")
+                                      }
+                                    >
+                                      {d.published ? "Live" : "Offline"}
+                                    </span>
+                                  ) : null}
+                                </span>
                                 <small>
-                                  {d.format}
+                                  {project.name} · {d.format}
                                   {d.entryPoint
                                     ? " · " + d.entries.length + " files"
-                                    : ""}
+                                    : " · Linked design"}
                                 </small>
                               </div>
                             </div>
@@ -1207,15 +1229,6 @@ export default function Desk({ loginName }: { loginName: string }) {
                                 <option key={s}>{s}</option>
                               ))}
                             </select>
-                          </td>
-                          <td>
-                            {d.revision ? (
-                              <span className="website-state">
-                                {d.published ? "Live" : "Offline"}
-                              </span>
-                            ) : (
-                              <span className="muted">Linked design</span>
-                            )}
                           </td>
                           <td className="updated">{date(d.updated)}</td>
                           <td>

@@ -42,11 +42,47 @@ body{padding-bottom:43px}.local-tools{position:fixed;z-index:60;bottom:0;left:0;
   .design-table tbody{display:block}
   .design-table tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;padding:20px;border-top:1px solid #e5ece7}
   .design-table tbody td{display:block;padding:0;border:0;white-space:normal;min-width:0}
-  .design-table tbody td:first-child,.design-table tbody td:nth-child(4),.design-table tbody td:last-child{grid-column:1/-1}
+  .design-table tbody td:first-child,.design-table tbody td:nth-child(3),.design-table tbody td:last-child{grid-column:1/-1}
   .design-table tbody td:nth-child(2)::before{content:"Use status";display:block;font-size:12px;margin-bottom:7px;color:#718777}
-  .design-table tbody td:nth-child(3)::before{content:"Website";display:block;font-size:12px;margin-bottom:7px;color:#718777}
-  .design-table tbody td:nth-child(4)::before{content:"Last updated · ";color:#718777}
-  .design-table .row-actions{display:grid;grid-template-columns:1fr 1fr;min-width:0;max-width:none;margin:0;padding-top:4px}
+  .design-table tbody td:nth-child(3)::before{content:"Last updated · ";color:#718777}
+  .design-table .row-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));min-width:0;max-width:none;margin:0;padding-top:4px}
   .design-table .row-actions .compact{white-space:normal;min-height:40px}
   .design-table .design-title{max-width:none}
+  .design-table .design-name>div{max-width:none}
 }
+
+/* Project workspace refinements: brand link, project heading, single-line design rows. */
+.brand{color:inherit;text-decoration:none}
+.brand-title{color:#2b4434;display:block;font-size:21px;font-weight:600;line-height:1.2}
+.brandmark img{display:block;width:26px;height:26px;object-fit:contain}
+
+.page-heading h1{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
+.page-heading h1 .launch-pill{padding:5px 10px;border-radius:6px;font-size:12px;letter-spacing:0}
+.project-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+.project-meta .separator{margin:0 4px}
+.project-meta .meta-label{color:#9aa89e;margin-right:4px;font-size:11px;font-weight:600;letter-spacing:.9px;text-transform:uppercase}
+.last-project-updated{flex-wrap:wrap;justify-content:flex-end;text-align:right}
+
+@media (min-width:1101px){.design-table{min-width:0}}
+.design-table th,.design-table td{padding-left:16px;padding-right:16px}
+.design-table .design-title{max-width:225px}
+.design-name>div{max-width:225px}
+.design-table td:first-child{min-width:248px}
+.design-name small{white-space:normal;overflow-wrap:anywhere}
+.website-state{display:inline-block;vertical-align:1px;margin-left:8px;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:500;letter-spacing:0}
+.website-state.is-live{color:#2f6b46;background:#eaf5ee;border:1px solid #d3e7da}
+.website-state.is-offline{color:#7c8a80;background:#f4f6f4;border:1px solid #e3e9e5}
+
+.row-actions{flex-wrap:nowrap;min-width:0;max-width:none;gap:6px}
+.row-actions .compact{padding:8px 10px}
+
+.status-select,.status-filter{
+  appearance:none;-webkit-appearance:none;width:auto;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%2388a091' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 12px center;background-size:10px 6px;
+}
+.status-select{padding:7px 30px 7px 13px;border-radius:999px;font-size:12px;font-weight:500}
+.status-select.status-unused{color:#7e8e83;background-color:#f7f9f7;border-color:#e5ebe6}
+.status-select.status-active{color:#527c5f;background-color:#edf6ef;border-color:#d5e8db}
+.status-select.status-suspended{color:#a4544a;background-color:#fdf1ee;border-color:#f0dbd5}
+.status-filter{width:150px;padding:8px 30px 8px 13px;border-radius:8px;font-size:12px;font-weight:500}

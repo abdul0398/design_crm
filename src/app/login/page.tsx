@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import { Layers3 } from "lucide-react";
 export default function Login() {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -29,9 +28,9 @@ export default function Login() {
         }}
       >
         <span className="brandmark">
-          <Layers3 size={22} />
+          <img src="/jome-journey-mark.png" alt="" width={30} height={30} />
         </span>
-        <h1>Welcome to Launch</h1>
+        <h1>Jome Journey</h1>
         <p>Sign in to your design desk.</p>
         <label>
           Username or email
