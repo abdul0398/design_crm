@@ -56,13 +56,24 @@ body{padding-bottom:43px}.local-tools{position:fixed;z-index:60;bottom:0;left:0;
 .brand-title{color:#292d46;display:block;font-size:21px;font-weight:600;line-height:1.2}
 .brandmark img{display:block;width:26px;height:26px;object-fit:contain}
 
-@media (min-width:768px){.page-heading{align-items:flex-end}}
-.page-heading h1{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
+/* Project heading: title block on the left, actions and caption on the right. */
+@media (min-width:1200px){.page-heading{align-items:flex-end}}
+.project-heading-main{min-width:0}
+.page-heading h1{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .page-heading h1 .launch-pill{padding:5px 10px;border-radius:6px;font-size:12px;letter-spacing:0}
-.project-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
-.project-meta .separator{margin:0 4px}
-.project-meta .meta-label{color:#9599ad;margin-right:4px;font-size:11px;font-weight:600;letter-spacing:.9px;text-transform:uppercase}
+.project-meta{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
+.project-meta-row{display:flex;align-items:baseline;gap:10px;max-width:100%}
+.project-meta .meta-label{flex:0 0 auto;min-width:86px;color:#9599ad;font-size:11px;font-weight:600;letter-spacing:.9px;text-transform:uppercase}
+.project-meta .meta-value{min-width:0}
+.project-heading-meta{flex:0 0 auto;align-items:flex-end}
 .last-project-updated{flex-wrap:wrap;justify-content:flex-end;align-items:baseline;text-align:right}
+
+/* Below the two-column width, put the title first and the actions on their own row. */
+@media (max-width:1199px){
+  .page-heading{display:block}
+  .project-heading-meta{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;max-width:none;margin-top:22px}
+  .project-heading-actions{justify-content:flex-start}
+}
 
 @media (min-width:1101px){.design-table{min-width:0}}
 .design-table th,.design-table td{padding-left:16px;padding-right:16px}

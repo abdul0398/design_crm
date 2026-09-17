@@ -1053,7 +1053,7 @@ export default function Desk({ loginName }: { loginName: string }) {
           ) : (
             <>
               <div className="page-heading">
-                <div>
+                <div className="project-heading-main">
                   <div className="eyebrow">PROJECT WORKSPACE</div>
                   <h1>
                     {project.name}
@@ -1066,17 +1066,20 @@ export default function Desk({ loginName }: { loginName: string }) {
                       {project.window}
                     </span>
                   </h1>
-                  <p className="project-meta">
-                    <span>
+                  <div className="project-meta">
+                    <div className="project-meta-row">
                       <span className="meta-label">Address</span>
-                      {project.site || "To be confirmed"}
-                    </span>
-                    <span className="separator">·</span>
-                    <span>
+                      <span className="meta-value">
+                        {project.site || "To be confirmed"}
+                      </span>
+                    </div>
+                    <div className="project-meta-row">
                       <span className="meta-label">Developer</span>
-                      {project.developer || "To be confirmed"}
-                    </span>
-                  </p>
+                      <span className="meta-value">
+                        {project.developer || "To be confirmed"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 <div className="project-heading-meta">
                   <div className="project-heading-actions">
